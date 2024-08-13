@@ -1,0 +1,38 @@
+from setuptools import find_packages, setup
+
+setup(
+    name="cellradar",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=[
+        "pathlib",
+        "pickle5",
+        "pandas",
+        "opencv-python",
+        "matplotlib",
+        "numpy",
+        "tqdm",
+        "scikit-image",
+        "shapely",
+        "stardist",
+        "tensorflow",
+        "csbdeep",
+        "scikit-learn",
+        "scipy",
+    ],
+    author="Marc Canela",
+    author_email="mcanela@researchmar.net",
+    description="A package for analyzing cells in fluorescent images",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/yourusername/cell_radar",
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+        "Intended Audience :: Science/Research",
+        "Topic :: Scientific/Engineering :: Image Processing",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ],
+    python_requires=">=3.6",
+)
