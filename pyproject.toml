@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cellradar"
+version = "0.1.0"
+authors = [
+  { name="Marc Canela", email="mcanela@researchmar.net" },
+]
+description = "A package for analyzing cells in fluorescent images"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT License"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["image", "fluorescence", "cFos", "tdTomato", "immunohistochemistry", "count cells", "colocalization"]
+dependencies = [
+    "pathlib",
+    "pickle5",
+    "pandas",
+    "opencv-python",
+    "matplotlib",
+    "numpy",
+    "tqdm",
+    "scikit-image",
+    "shapely",
+    "stardist",
+    "tensorflow",
+    "csbdeep",
+    "scikit-learn",
+    "scipy",
+]
+
+[project.urls]
+Homepage = "https://github.com/marccanela/cellradar"
