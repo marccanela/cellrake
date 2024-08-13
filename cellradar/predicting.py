@@ -4,7 +4,7 @@
 
 import pickle as pkl
 from pathlib import Path
-from typing import Dict, Optional, Path
+from typing import Dict, Optional
 
 import cv2
 import matplotlib.colors as mcolors

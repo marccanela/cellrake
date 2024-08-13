@@ -36,6 +36,7 @@ dependencies = [
     "csbdeep",
     "scikit-learn",
     "scipy",
+    "typing"
 ]
 
 [project.urls]
