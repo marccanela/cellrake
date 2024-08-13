@@ -25,7 +25,7 @@ setup(
     description="A package for analyzing cells in fluorescent images",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/cell_radar",
+    url="https://github.com/marccanela/cellradar",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
