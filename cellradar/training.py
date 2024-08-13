@@ -1,7 +1,5 @@
 """
-Created on Thu Jul 25 13:07:53 2024
-@author: mcanela
-TRAINING AN SVM TO CLASSIFY CELLS
+@author: Marc Canela
 """
 
 import matplotlib.pyplot as plt

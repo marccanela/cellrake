@@ -1,6 +1,5 @@
 """
-Created on Fri Aug  9 13:44:44 2024
-@author: mcanela
+@author: Marc Canela
 """
 
 import pickle as pkl

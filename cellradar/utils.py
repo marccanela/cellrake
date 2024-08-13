@@ -1,6 +1,5 @@
 """
-Created on Sat Aug 10 11:12:16 2024
-@author: mcanela
+@author: Marc Canela
 """
 
 import cv2
@@ -234,11 +233,6 @@ def extract_roi_stats(layer, roi_info):
         "sd_intensity": np.std(cell_pixels),
         "min_intensity": np.min(cell_pixels),
         "max_intensity": np.max(cell_pixels),
-        # 'mean_background': background_pixels_mean,
-        # 'median_background':  np.median(background_pixels),
-        # 'sd_background': np.std(background_pixels),
-        # 'min_background': np.min(background_pixels),
-        # 'max_background': np.max(background_pixels),
         "mean_ratio": cell_pixels_mean
         / (background_pixels_mean if background_pixels_mean != 0 else 1),
         "mean_difference": cell_pixels_mean - background_pixels_mean,

@@ -1,6 +1,5 @@
 """
-Created on Thu Jul  4 15:43:26 2024
-@author: mcanela
+@author: Marc Canela
 """
 
 import pickle
@@ -119,14 +118,6 @@ def analyze_roi(roi_name, roi_stats, best_model):
         criteria (label == 1); otherwise, `None`.
     """
 
-    # Exclude large ROIs
-    # if roi_stats['area'] > 1000:
-    #     return None
-
-    # Pre-select the ROIs based on mean difference
-    # if roi_stats['mean_difference'] < 0:
-    #     return False
-
     # Create input matrix
     X = np.array(list(roi_stats.values())).reshape(1, -1)
 
@@ -203,14 +194,6 @@ def analyze_image(tag, layers, rois, cmap, project_folder, best_model):
         axes[1].plot(roi["x"], roi["y"], "b-", linewidth=1)
     axes[1].set_title("Identified Cells")
     axes[1].axis("off")
-
-    # canvas = np.zeros(layer.shape, dtype=np.uint8)
-    # for roi in keeped.values():
-    #     coordinates = np.array([list(zip(roi["x"], roi["y"]))], dtype=np.int32)
-    #     cv2.fillPoly(canvas, coordinates, 255)
-    # axes[1].imshow(canvas, cmap=cmap)
-    # axes[1].set_title("Identified Cells")
-    # axes[1].axis("off")
 
     plt.tight_layout()
     png_path = project_folder / "labelled_images" / f"{tag}.png"
@@ -409,14 +392,6 @@ def colocalize(
             axes[3].plot(roi["x"], roi["y"], "b-", linewidth=1)
         axes[3].set_title("Colocalized Cells")
         axes[3].axis("off")
-
-        # canvas = np.zeros(layer_1.shape, dtype=np.uint8)
-        # for roi in overlapped.values():
-        #     coordinates = np.array([list(zip(roi["x"], roi["y"]))], dtype=np.int32)
-        #     cv2.fillPoly(canvas, coordinates, 255)
-        # axes[2].imshow(canvas, cmap='Blues')
-        # axes[2].set_title("Colocalized Cells")
-        # axes[2].axis("off")
 
         plt.tight_layout()
         png_path = colocalization_images_path / f"{tag}.png"
