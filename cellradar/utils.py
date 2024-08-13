@@ -2,6 +2,9 @@
 @author: Marc Canela
 """
 
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import cv2
 import numpy as np
 from shapely.geometry import Polygon
@@ -9,7 +12,7 @@ from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 from skimage.measure import label, regionprops
 
 
-def get_layer(image):
+def get_layer(image: np.ndarray) -> np.ndarray:
     """
     This function checks if the image is 2D or 3D. If the image is 2D,
     it directly returns that layer. If the image is 3D, it finds the
@@ -20,31 +23,54 @@ def get_layer(image):
     ----------
     image : numpy.ndarray
         A 2D or 3D NumPy array representing the image. The shape of the array
-        should be (height, width) for 2D or (height, width, num_layers) for 3D.
+        should be (height, width) for single-layer images or (height, width, num_layers)
+        for multi-layer images.
 
     Returns:
     -------
     numpy.ndarray or None
-        The single 2D layer if the image is 2D, the first non-empty layer
-        if the image is 3D, or `None` if all layers are empty.
+        The single 2D layer if the image only has one layer, the first 2D non-empty layer
+        if the image is multi-layer, or `None` if all layers are empty.
     """
     if image.ndim == 2:
         return image
 
+    # Sum the pixel values across the height and width for each layer
     layer_sums = np.sum(image, axis=(0, 1))
+
+    # Find indices of layers that are non-zero
     non_zero_layer_indices = np.nonzero(layer_sums)[0]
 
+    # Return the first non-empty layer or None if all layers are empty
     if non_zero_layer_indices.size > 0:
         return image[:, :, non_zero_layer_indices[0]]
     else:
         return None
 
 
-def build_project(image_folder):
+def build_project(image_folder: Path) -> Path:
+    """
+    This function sets up a new directory for organizing analysis results. The
+    directory structure includes folders for raw ROIs, processed ROIs, and
+    labelled images. The base project directory is named after the input folder
+    with an "_analysis" suffix.
 
+    Parameters:
+    ----------
+    image_folder : Path
+        A `Path` object representing the folder containing the images to be analyzed.
+        The project directory will be created in the parent directory of this folder.
+
+    Returns:
+    -------
+    Path
+        The path to the created project directory.
+    """
+    # Create the base project folder with "_analysis" suffix
     project_folder = image_folder.parent / f"{image_folder.stem}_analysis"
     project_folder.mkdir(parents=True, exist_ok=True)
 
+    # Create subdirectories for raw ROIs, processed ROIs, and labelled images
     rois_raw_folder = project_folder / "rois_raw"
     rois_raw_folder.mkdir(parents=True, exist_ok=True)
 
@@ -83,76 +109,107 @@ def change_names(folder_path, number: int = 300):
                     print(f"Error processing {filename.name}: {e}")
 
 
-def get_cell_mask(layer, coordinates):
+def get_cell_mask(layer: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
     """
-    Create a binary mask from the given Region of Interest (ROI) coordinates.
-    This function creates a binary mask where the specified ROI is filled with
-    ones (1) and the rest of the mask is zeros (0). The mask is created
-    based on the coordinates provided, which define the polygonal region
-    to be filled.
+    This function generates a binary mask where the specified ROI regions,
+    defined by polygonal coordinates, are filled with ones (1). All other
+    areas in the mask are set to zeros (0). The dimensions of the mask match
+    the dimensions of the input image layer.
 
     Parameters:
     ----------
     layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of the array
+        A 2D NumPy array representing the image layer. The shape of this array
         (height, width) determines the dimensions of the resulting mask.
 
     coordinates : list of numpy.ndarray
-        A list where each element is a NumPy array of shape (N, 2)
-        representing the vertices of a polygon. These coordinates specify
-        the regions to be filled in the mask.
+        A NumPy array of shape (N, 2) that represents the vertices of a polygon
+        that defines a ROI. This polygon specifies the area to be filled in the mask.
 
     Returns:
     -------
     numpy.ndarray
-        A binary mask of the same shape as `layer`. Pixels inside the defined
-        regions are set to `1`, and all other pixels are set to `0`.
+        A binary mask of the same shape as `layer`. Pixels within the defined
+        polygonal regions are set to `1`, and all other pixels are set to `0`.
     """
+    # Initialize a mask with 0 of the same shape as the input layer
     mask = np.zeros(layer.shape, dtype=np.uint8)
+
+    # Fill the polygon defined by coordinates with 1 in the mask
     cv2.fillPoly(mask, coordinates, 1)
+
     return mask
 
 
-def crop_cell(layer, x_coords, y_coords):
+def crop_cell(
+    layer: np.ndarray,
+    x_coords: Union[List[int], np.ndarray],
+    y_coords: Union[List[int], np.ndarray],
+) -> np.ndarray:
     """
-    Crop a rectangular region from an image layer based on given coordinates.
-    This function extracts a rectangular subregion from the provided image
-    `layer`. The rectangle is defined by the minimum and maximum x and y
-    coordinates. The subregion is extracted by slicing the `layer` array.
+    This function extracts a rectangular subregion from the provided image `layer`.
+    The rectangle is defined by the minimum and maximum x and y coordinates.
+    The subregion is extracted by slicing the `layer` array.
 
     Parameters:
     ----------
     layer : numpy.ndarray
-        A 2D NumPy array representing the image layer from which the region is
-        to be cropped. The shape of the array should be (height, width).
+        A 2D NumPy array representing the image layer from which the region is to be cropped.
+        The shape of the array should be (height, width).
 
     x_coords : list or numpy.ndarray
-        A list or array of x-coordinates defining the boundary of the
-        rectangular region to crop. These coordinates determine the horizontal
-        extent of the region.
+        A list or array of x-coordinates defining the horizontal extent of the rectangular region to crop.
+        The function calculates the minimum and maximum x-coordinates to determine the horizontal boundaries.
 
     y_coords : list or numpy.ndarray
-        A list or array of y-coordinates defining the boundary of the
-        rectangular region to crop. These coordinates determine the vertical
-        extent of the region.
+        A list or array of y-coordinates defining the vertical extent of the rectangular region to crop.
+        The function calculates the minimum and maximum y-coordinates to determine the vertical boundaries.
 
     Returns:
     -------
     numpy.ndarray
-        A 2D NumPy array representing the cropped region of the image layer.
+        A 2D NumPy array representing the cropped region of the image layer. The dimensions of the
+        cropped region are determined by the min and max x and y coordinates.
     """
+    # Extract min and max coordinates and convert to integers
     x_min, x_max = int(min(x_coords)), int(max(x_coords))
     y_min, y_max = int(min(y_coords)), int(max(y_coords))
+
+    # Crop the rectangular region from the layer
     return layer[y_min : y_max + 1, x_min : x_max + 1]
 
 
-def convert_to_roi(polygon, layer):
+def convert_to_roi(
+    polygon: Polygon, layer: np.ndarray
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    This function extracts the coordinates of the polygons and converts them into ROIs.
+    It clips the coordinates to ensure they lie within the bounds of the given image layer.
 
+    Parameters:
+    ----------
+    polygon : shapely.geometry.Polygon
+        A Polygon object containing the coordinates of the regions of interest.
+
+    layer : numpy.ndarray
+        A 2D NumPy array representing the image layer. The shape of the array should be
+        (height, width).
+
+    Returns:
+    -------
+    dict
+        A dictionary where each key is a string identifier for an ROI ("roi_0", "roi_1", etc.),
+        and each value is another dictionary with 'x' and 'y' keys containing the clipped
+        x and y coordinates of the ROI.
+    """
+    # Extract coordinates from the Polygon object
     polygon_coord = polygon["coord"]
-    rois_dict = {}
 
+    # Extract dimensions of the layer
     layer_height, layer_width = layer.shape
 
+    # Iterate
+    rois_dict = {}
     for n in range(polygon_coord.shape[0]):
         roi_y = polygon_coord[n, 0, :]
         roi_x = polygon_coord[n, 1, :]
@@ -161,72 +218,100 @@ def convert_to_roi(polygon, layer):
         roi_y = np.clip(roi_y, 0, layer_height - 1)
         roi_x = np.clip(roi_x, 0, layer_width - 1)
 
+        # Store the clipped coordinates in the dictionary
         rois_dict[f"roi_{n}"] = {"x": roi_x, "y": roi_y}
 
     return rois_dict
 
 
-def extract_roi_stats(layer, roi_info):
+def extract_roi_stats(
+    layer: np.ndarray, roi_info: Dict[str, Any]
+) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
-    This function processes a given ROI within an image layer by calculating
-    several statistical and texture features.
+    This function computes a binary mask for the ROI, crops the image and mask to
+    the bounding box of the ROI, and calculates a range of statistical and texture
+    features from the cropped and masked region.
 
     Parameters:
     ----------
     layer : numpy.ndarray
-        A 2D NumPy array representing the image layer from which the ROI is
-        extracted. The shape of the array should be (height, width).
+        A 2D NumPy array representing the image layer. The shape should be (height, width).
 
     roi_info : dict
-        A dictionary containing the coordinates of the ROI. It should have, at
-        least, the following keys:
+        A dictionary containing the coordinates of the ROI with the following keys:
         - "x": A list or array of x-coordinates of the ROI vertices.
         - "y": A list or array of y-coordinates of the ROI vertices.
 
     Returns:
     -------
-    cell_mask: numpy.ndarray
-        A binary 2D NumPy array with the same size as the layer, containing 1
-        at the position of the ROi, else 0.
+    cell_mask : numpy.ndarray
+        A binary 2D NumPy array with the same size as `layer`, where pixels within the ROI are set to 1.
 
-    stats_dict: dict
-        Dictionary of statistics and texture features.
+    stats_dict : dict
+        A dictionary containing various statistical and texture features extracted from the ROI:
+        - "mean_intensity": Mean pixel intensity within the ROI.
+        - "median_intensity": Median pixel intensity within the ROI.
+        - "sd_intensity": Standard deviation of pixel intensities within the ROI.
+        - "min_intensity": Minimum pixel intensity within the ROI.
+        - "max_intensity": Maximum pixel intensity within the ROI.
+        - "mean_ratio": Ratio of mean intensity of the ROI to the background.
+        - "mean_difference": Difference between mean intensity of the ROI and the background.
+        - "lbp_mean": Mean Local Binary Pattern (LBP) value within the ROI.
+        - "lbp_std": Standard deviation of LBP values within the ROI.
+        - "contrast": Contrast from the Gray Level Co-occurrence Matrix (GLCM).
+        - "correlation": Correlation from the GLCM.
+        - "energy": Energy from the GLCM.
+        - "homogeneity": Homogeneity from the GLCM.
+        - "area": Area of the ROI.
+        - "perimeter": Perimeter of the ROI.
+        - "eccentricity": Eccentricity of the ROI.
+        - "major_axis_length": Length of the major axis of the ROI.
+        - "minor_axis_length": Length of the minor axis of the ROI.
+        - "solidity": Solidity of the ROI.
+        - "extent": Extent of the ROI.
+        - "hog_mean": Mean Histogram of Oriented Gradients (HOG) descriptor value.
+        - "hog_std": Standard deviation of the HOG descriptor values.
     """
+    # Extract ROI coordinates from the dictionary
     x_coords, y_coords = roi_info["x"], roi_info["y"]
     coordinates = np.array([list(zip(x_coords, y_coords))], dtype=np.int32)
 
-    # Create cell mask
+    # Create a binary mask for the ROI
     cell_mask = get_cell_mask(layer, coordinates)
 
-    # Crop to the bounding box of the ROI to reduce computation
+    # Crop the layer and mask to the bounding box of the ROI
     layer_cropped = crop_cell(layer, x_coords, y_coords)
     cell_mask_cropped = crop_cell(cell_mask, x_coords, y_coords)
 
+    # Create a background mask
     background_mask_cropped = 1 - cell_mask_cropped
 
+    # Extract pixel values for the ROI and background
     cell_pixels = layer[cell_mask == 1]
     cell_pixels_mean = np.mean(cell_pixels)
     background_pixels = layer_cropped[background_mask_cropped == 1]
     background_pixels_mean = np.mean(background_pixels)
 
+    # Mask the cropped layer and calculate texture features
     layer_cropped_masked = layer_cropped * cell_mask_cropped
     layer_masked = layer * cell_mask
 
-    # Calculate LBP
+    # Calculate Local Binary Pattern (LBP)
     lbp = local_binary_pattern(layer_cropped_masked, P=8, R=1, method="uniform")
 
-    # Calculate GLCM features
+    # Calculate Gray Level Co-occurrence Matrix (GLCM) features
     glcm = graycomatrix(
         layer_masked, distances=[1], angles=[0], levels=256, symmetric=True, normed=True
     )
 
-    # Calculate regionprops
+    # Calculate region properties
     prop = regionprops(label(cell_mask_cropped))[0]
 
-    # HOG features
+    # Compute Histogram of Oriented Gradients (HOG) features
     hog_descriptor = cv2.HOGDescriptor()
-    h = hog_descriptor.compute(layer_masked).flatten()  # Flatten the HOG descriptor
+    hog_descriptor_values = hog_descriptor.compute(layer_masked).flatten()
 
+    # Create a dictionary to store the extracted features
     stats_dict = {
         "mean_intensity": cell_pixels_mean,
         "median_intensity": np.median(cell_pixels),
@@ -253,97 +338,219 @@ def extract_roi_stats(layer, roi_info):
         "minor_axis_length": prop.minor_axis_length,
         "solidity": prop.solidity,
         "extent": prop.extent,
-        "hog_mean": np.mean(h),
-        "hog_std": np.std(h),
+        "hog_mean": np.mean(hog_descriptor_values),
+        "hog_std": np.std(hog_descriptor_values),
     }
 
     return cell_mask, stats_dict
 
 
-def create_stats_dict(roi_dict, layer):
+def create_stats_dict(
+    roi_dict: Dict[str, Dict[str, Any]], layer: np.ndarray
+) -> Dict[str, Dict[str, Any]]:
+    """
+    This function calculates features for each ROI, combines the results, and computes additional statistics
+    based on the entire set of ROIs, including background statistics.
 
+    Parameters:
+    ----------
+    roi_dict : dict
+        A dictionary where each key is a name for a ROI and each value is another dictionary containing
+        the coordinates of the ROI with keys "x" and "y".
+
+    layer : numpy.ndarray
+        A 2D NumPy array representing the image layer from which the ROIs are extracted. The shape should be (height, width).
+
+    Returns:
+    -------
+    dict
+        A dictionary with ROI names as keys and dictionaries of statistical features as values. Each features dictionary
+        includes computed statistics for each ROI, including additional ratios and differences.
+    """
     cell_masks = []
     roi_props = {}
 
+    # Extract statistics for each ROI
     for roi_name, roi_info in roi_dict.items():
         cell_mask, stats_dict = extract_roi_stats(layer, roi_info)
         roi_props[roi_name] = stats_dict
         cell_masks.append(cell_mask)
 
-    # Compute all background
-    all_cell_mask = np.bitwise_or.reduce(cell_masks)
-    all_background_mask = 1 - all_cell_mask
-    all_background_pixels = layer[all_background_mask == 1]
-    all_background_pixels_nonzero = all_background_pixels[all_background_pixels != 0]
-    mean_all_background = np.mean(all_background_pixels_nonzero)
+    # Compute combined background statistics
+    combined_cell_mask = np.bitwise_or.reduce(cell_masks)
+    combined_background_mask = 1 - combined_cell_mask
+    combined_background_pixels = layer[combined_background_mask == 1]
+    nonzero_background_pixels = combined_background_pixels[
+        combined_background_pixels != 0
+    ]
 
-    cell_means_image = []
+    # Handle case when all background pixels are zero to avoid division by zero
+    mean_background = (
+        np.mean(nonzero_background_pixels) if nonzero_background_pixels.size > 0 else 0
+    )
+
+    # Update statistics with additional ratios and differences
     for stats_dict in roi_props.values():
         mean_intensity = stats_dict["mean_intensity"]
-        stats_dict["mean_all_ratio"] = mean_intensity / mean_all_background
-        stats_dict["mean_all_difference"] = mean_intensity - mean_all_background
-        cell_means_image.append(mean_intensity)
+        stats_dict["mean_all_ratio"] = mean_intensity / (
+            mean_background if mean_background != 0 else 1
+        )
+        stats_dict["mean_all_difference"] = mean_intensity - mean_background
 
-    # Compute max mean cell intensity
-    max_mean_intensity = max(cell_means_image)
+    # Compute maximum mean intensity across all ROIs
+    max_mean_intensity = max(
+        stats_dict["mean_intensity"] for stats_dict in roi_props.values()
+    )
     for stats_dict in roi_props.values():
         mean_intensity = stats_dict["mean_intensity"]
-        stats_dict["mean_max_ratio"] = max_mean_intensity / mean_intensity
+        stats_dict["mean_max_ratio"] = max_mean_intensity / (
+            mean_intensity if mean_intensity != 0 else 1
+        )
         stats_dict["mean_max_difference"] = max_mean_intensity - mean_intensity
 
     return roi_props
 
 
-def crop_cell_large(layer, x_coords, y_coords, padding=None):
+def crop_cell_large(
+    layer: np.ndarray,
+    x_coords: List[float],
+    y_coords: List[float],
+    padding: Optional[int] = None,
+) -> Tuple[np.ndarray, List[float], List[float]]:
+    """
+    This function extracts a subregion from the image `layer` based on the provided x and y coordinates
+    and adjusts these coordinates relative to the cropped image. Padding can be applied to extend the
+    crop area beyond the bounding box of the ROI.
 
+    Parameters:
+    ----------
+    layer : numpy.ndarray
+        A 2D or 3D NumPy array representing the image layer. The shape should be (height, width) or (height, width, channels).
+
+    x_coords : list of float
+        A list of x-coordinates defining the boundary of the rectangular region to crop.
+
+    y_coords : list of float
+        A list of y-coordinates defining the boundary of the rectangular region to crop.
+
+    padding : int or None, optional
+        An integer value specifying the amount of padding to add to the crop area. If None, padding
+        will be set to the width or height of the bounding box of the ROI. Defaults to None.
+
+    Returns:
+    -------
+    Tuple[np.ndarray, List[float], List[float]]
+        - The cropped image layer as a NumPy array.
+        - The x-coordinates adjusted to the cropped image.
+        - The y-coordinates adjusted to the cropped image.
+    """
+    # Determine cropping boundaries
     x_min, x_max = int(min(x_coords)), int(max(x_coords))
-    if padding is None:
-        x_padding = x_max - x_min
-    else:
-        x_padding = padding
-    x_min, x_max = x_min - x_padding, x_max + x_padding
-
     y_min, y_max = int(min(y_coords)), int(max(y_coords))
-    if padding is None:
-        y_padding = y_max - y_min
-    else:
-        y_padding = padding
-    y_min, y_max = y_min - y_padding, y_max + y_padding
 
+    # Apply padding if specified
+    if padding is not None:
+        x_min -= padding
+        x_max += padding
+        y_min -= padding
+        y_max += padding
+    else:
+        x_padding = x_max - x_min
+        y_padding = y_max - y_min
+        x_min -= x_padding
+        x_max += x_padding
+        y_min -= y_padding
+        y_max += y_padding
+
+    # Ensure cropping boundaries are within image dimensions
     layer_height, layer_width = layer.shape[:2]
     x_min = max(0, x_min)
     x_max = min(layer_width - 1, x_max)
     y_min = max(0, y_min)
     y_max = min(layer_height - 1, y_max)
 
+    # Crop the image
     layer_cropped = layer[y_min : y_max + 1, x_min : x_max + 1]
+
+    # Adjust coordinates relative to the cropped image
     x_coords_cropped = [x - x_min for x in x_coords]
     y_coords_cropped = [y - y_min for y in y_coords]
+
     return layer_cropped, x_coords_cropped, y_coords_cropped
 
 
-def compress(image, compress_n=2):
+def compress(image: np.ndarray, compress_n: int = 2) -> np.ndarray:
+    """
+    This function reduces the size of the input image by a factor specified by `compress_n`.
+    The image is resized using bilinear interpolation, which is suitable for most image compression tasks.
 
+    Parameters:
+    ----------
+    image : numpy.ndarray
+        A 2D or 3D NumPy array representing the image to be compressed. The shape should be (height, width, channels) for color images.
+
+    compress_n : int, optional
+        The factor by which to reduce the image dimensions. The output dimensions will be the original dimensions divided by `compress_n`.
+        The default value is 2, which halves the dimensions of the image.
+
+    Returns:
+    -------
+    numpy.ndarray
+        The resized image as a NumPy array. The shape of the output image will be (height // compress_n, width // compress_n) for grayscale
+        images or (height // compress_n, width // compress_n, channels) for color images.
+    """
+    # Get the original dimensions
     height, width = image.shape[:2]
 
     return cv2.resize(image, (width // compress_n, height // compress_n))
 
 
-def crop(layer):
+def crop(layer: np.ndarray) -> np.ndarray:
+    """
+    This function trims the input image layer to remove any rows or columns that contain only zero values.
 
-    # Eliminate rows and columns that are entirely zeros
+    Parameters:
+    ----------
+    layer : numpy.ndarray
+        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
+
+    Returns:
+    -------
+    numpy.ndarray
+        The cropped image layer with zero-only rows and columns removed.
+    """
+    # Remove rows that are entirely zeros
     layer = layer[~np.all(layer == 0, axis=1)]
+
+    # Remove columns that are entirely zeros
     layer = layer[:, ~np.all(layer == 0, axis=0)]
 
     return layer
 
 
-def fix_polygon(polygon):
+def fix_polygon(polygon: Polygon) -> Polygon:
+    """
+    This function checks if the provided polygon is valid. If it is not valid, it attempts to fix the polygon by
+    applying a buffer with a width of zero. If the polygon is still invalid after this operation, a message is printed
+    and `None` is returned.
+
+    Parameters:
+    ----------
+    polygon : shapely.geometry.Polygon
+        The input polygon that needs validation and potential correction.
+
+    Returns:
+    -------
+    shapely.geometry.Polygon or None
+        A valid polygon if the correction was successful, or `None` if the polygon could not be fixed.
+    """
     if not polygon.is_valid:
-        # Try to fix by applying a small buffer
+        # Attempt to fix the polygon by applying a zero-width buffer
         polygon = polygon.buffer(0)
-        # Check if the polygon is still invalid
+
+        # Check if the polygon is still invalid after buffering
         if not polygon.is_valid:
             print("Polygon could not be fixed. Skipping this polygon.")
             return None
+
     return polygon
