@@ -6,7 +6,6 @@ import pickle as pkl
 from pathlib import Path
 from typing import Dict, Optional
 
-import cv2
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,15 +14,15 @@ from shapely.geometry import Polygon
 from skimage.measure import label, regionprops
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
+from PIL import Image
+from scipy.ndimage import zoom
 
 from cellradar.utils import (
-    compress,
     create_stats_dict,
     crop,
-    crop_cell,
     fix_polygon,
     get_cell_mask,
-    get_layer,
+    crop_cell_large,
 )
 
 
@@ -400,9 +399,11 @@ def colocalize(
         fig, axes = plt.subplots(1, 4, figsize=(15, 5))
 
         image_path_1 = list(images_path_1.glob(f"*{tag}.tif"))[0]
-        image_1 = cv2.imread(str(image_path_1), cv2.IMREAD_UNCHANGED)
-        image_1 = compress(image_1)
-        layer_1 = get_layer(image_1)
+
+        image_1 = Image.open(image_path_1)
+        gray_image_1 = image_1.convert("L")
+        gray_image_1 = np.asarray(gray_image_1)
+        layer_1 = zoom(gray_image_1, zoom=0.5, order=1)
         layer_1 = crop(layer_1)
         axes[0].imshow(layer_1, cmap="Greens", vmin=0, vmax=255)
         axes[0].set_title(f"Original {images_path_1.stem} image")
@@ -415,9 +416,10 @@ def colocalize(
         axes[1].axis("off")
 
         image_path_2 = list(images_path_2.glob(f"*{tag}.tif"))[0]
-        image_2 = cv2.imread(str(image_path_2), cv2.IMREAD_UNCHANGED)
-        image_2 = compress(image_2)
-        layer_2 = get_layer(image_2)
+        image_2 = Image.open(image_path_2)
+        gray_image_2 = image_2.convert("L")
+        gray_image_2 = np.asarray(gray_image_2)
+        layer_2 = zoom(gray_image_2, zoom=0.5, order=1)
         layer_2 = crop(layer_2)
         axes[2].imshow(layer_2, cmap="Reds", vmin=0, vmax=255)
         axes[2].set_title(f"Original {images_path_2.stem} image")

@@ -25,7 +25,6 @@ dependencies = [
     "pathlib",
     "pickle5",
     "pandas",
-    "opencv-python",
     "matplotlib",
     "numpy",
     "tqdm",

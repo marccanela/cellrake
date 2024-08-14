@@ -6,14 +6,14 @@ import pickle as pkl
 from pathlib import Path
 from typing import Dict, Tuple
 
-import cv2
+from PIL import Image
+from scipy.ndimage import zoom
 import numpy as np
 from csbdeep.utils import normalize
-from stardist import export_imagej_rois
 from stardist.models import StarDist2D
 from tqdm import tqdm
 
-from cellradar.utils import compress, convert_to_roi, crop, get_layer
+from cellradar.utils import convert_to_roi, crop
 
 
 def iterate_segmentation(
@@ -109,13 +109,14 @@ def segment_image(tif_path: Path, model: StarDist2D) -> Tuple[np.ndarray, np.nda
         - `layer`: The processed 2D image layer from which the polygons were extracted.
     """
     # Read the image in its original form (unchanged)
-    image = cv2.imread(str(tif_path), cv2.IMREAD_UNCHANGED)
-
-    # Compress the image (optional)
-    image = compress(image)
+    pil_image = Image.open(tif_path)
 
     # Extract the relevant layer from the image
-    layer = get_layer(image)
+    gray_pil_image = pil_image.convert("L")  # L ("Luminance") stands for grayscale
+    gray_img = np.asarray(gray_pil_image)
+
+    # Compress the image
+    layer = zoom(gray_img, zoom=0.5, order=1)
 
     # Eliminate rows and columns that are entirely zeros
     layer = crop(layer)

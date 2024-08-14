@@ -5,11 +5,12 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import cv2
 import numpy as np
 from shapely.geometry import Polygon
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 from skimage.measure import label, regionprops
+from PIL import Image, ImageDraw
+from skimage.feature import hog
 
 
 def get_layer(image: np.ndarray) -> np.ndarray:
@@ -132,11 +133,17 @@ def get_cell_mask(layer: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
         A binary mask of the same shape as `layer`. Pixels within the defined
         polygonal regions are set to `1`, and all other pixels are set to `0`.
     """
-    # Initialize a mask with 0 of the same shape as the input layer
-    mask = np.zeros(layer.shape, dtype=np.uint8)
+    # Create a blank mask
+    mask = Image.new("L", layer.shape, 0)
 
-    # Fill the polygon defined by coordinates with 1 in the mask
-    cv2.fillPoly(mask, coordinates, 1)
+    # Create a draw object
+    draw = ImageDraw.Draw(mask)
+
+    # Draw the polygon on the mask (1 is the fill value)
+    draw.polygon(coordinates, outline=1, fill=1)
+
+    # Convert the mask to a numpy array if needed
+    mask = np.array(mask)
 
     return mask
 
@@ -308,8 +315,18 @@ def extract_roi_stats(
     prop = regionprops(label(cell_mask_cropped))[0]
 
     # Compute Histogram of Oriented Gradients (HOG) features
-    hog_descriptor = cv2.HOGDescriptor()
-    hog_descriptor_values = hog_descriptor.compute(layer_masked).flatten()
+    h_values, hog_image = hog(
+        layer_masked,
+        orientations=9,
+        pixels_per_cell=(8, 8),
+        cells_per_block=(2, 2),
+        block_norm="L2-Hys",
+        visualize=True,
+        feature_vector=True,
+    )
+
+    # Flatten the HOG features if needed (though skimage.hog already returns a flat array if feature_vector=True)
+    hog_descriptor_values = h_values.flatten()
 
     # Create a dictionary to store the extracted features
     stats_dict = {
@@ -479,53 +496,53 @@ def crop_cell_large(
     return layer_cropped, x_coords_cropped, y_coords_cropped
 
 
-def compress(image: np.ndarray, compress_n: int = 2) -> np.ndarray:
-    """
-    This function reduces the size of the input image by a factor specified by `compress_n`.
-    The image is resized using bilinear interpolation, which is suitable for most image compression tasks.
+# def compress(image: np.ndarray, compress_n: int = 2) -> np.ndarray:
+#     """
+#     This function reduces the size of the input image by a factor specified by `compress_n`.
+#     The image is resized using bilinear interpolation, which is suitable for most image compression tasks.
 
-    Parameters:
-    ----------
-    image : numpy.ndarray
-        A 2D or 3D NumPy array representing the image to be compressed. The shape should be (height, width, channels) for color images.
+#     Parameters:
+#     ----------
+#     image : numpy.ndarray
+#         A 2D or 3D NumPy array representing the image to be compressed. The shape should be (height, width, channels) for color images.
 
-    compress_n : int, optional
-        The factor by which to reduce the image dimensions. The output dimensions will be the original dimensions divided by `compress_n`.
-        The default value is 2, which halves the dimensions of the image.
+#     compress_n : int, optional
+#         The factor by which to reduce the image dimensions. The output dimensions will be the original dimensions divided by `compress_n`.
+#         The default value is 2, which halves the dimensions of the image.
 
-    Returns:
-    -------
-    numpy.ndarray
-        The resized image as a NumPy array. The shape of the output image will be (height // compress_n, width // compress_n) for grayscale
-        images or (height // compress_n, width // compress_n, channels) for color images.
-    """
-    # Get the original dimensions
-    height, width = image.shape[:2]
+#     Returns:
+#     -------
+#     numpy.ndarray
+#         The resized image as a NumPy array. The shape of the output image will be (height // compress_n, width // compress_n) for grayscale
+#         images or (height // compress_n, width // compress_n, channels) for color images.
+#     """
+#     # Get the original dimensions
+#     height, width = image.shape[:2]
 
-    return cv2.resize(image, (width // compress_n, height // compress_n))
+#     return cv2.resize(image, (width // compress_n, height // compress_n))
 
 
-def crop(layer: np.ndarray) -> np.ndarray:
-    """
-    This function trims the input image layer to remove any rows or columns that contain only zero values.
+# def crop(layer: np.ndarray) -> np.ndarray:
+#     """
+#     This function trims the input image layer to remove any rows or columns that contain only zero values.
 
-    Parameters:
-    ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
+#     Parameters:
+#     ----------
+#     layer : numpy.ndarray
+#         A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
 
-    Returns:
-    -------
-    numpy.ndarray
-        The cropped image layer with zero-only rows and columns removed.
-    """
-    # Remove rows that are entirely zeros
-    layer = layer[~np.all(layer == 0, axis=1)]
+#     Returns:
+#     -------
+#     numpy.ndarray
+#         The cropped image layer with zero-only rows and columns removed.
+#     """
+#     # Remove rows that are entirely zeros
+#     layer = layer[~np.all(layer == 0, axis=1)]
 
-    # Remove columns that are entirely zeros
-    layer = layer[:, ~np.all(layer == 0, axis=0)]
+#     # Remove columns that are entirely zeros
+#     layer = layer[:, ~np.all(layer == 0, axis=0)]
 
-    return layer
+#     return layer
 
 
 def fix_polygon(polygon: Polygon) -> Polygon:
