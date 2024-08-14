@@ -10,7 +10,7 @@ authors = [
 ]
 description = "A package for analyzing cells in fluorescent images"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "MIT License"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -37,7 +37,8 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "typing",
-    "openpyxl"
+    "openpyxl",
+    "pillow"
 ]
 
 [project.urls]

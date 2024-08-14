@@ -22,7 +22,7 @@ To install **Cell Radar**, you can clone the repository and install it using `pi
 ```bash
 git clone https://github.com/marccanela/cellradar.git
 cd cellradar
-pip install -e .
+pip install -i https://test.pypi.org/simple/ cellradar==0.1.0
 ```
 
 Make sure you have the required dependencies installed. You can find them in `pyproject.toml`.

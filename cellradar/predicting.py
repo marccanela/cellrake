@@ -15,7 +15,8 @@ from shapely.geometry import Polygon
 from skimage.measure import label, regionprops
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
-from utils import (
+
+from cellradar.utils import (
     compress,
     create_stats_dict,
     crop,

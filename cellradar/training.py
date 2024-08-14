@@ -2,8 +2,8 @@
 @author: Marc Canela
 """
 
-from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +29,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from tqdm import tqdm
-from utils import create_stats_dict, crop_cell_large
+
+from cellradar.utils import create_stats_dict, crop_cell_large
 
 
 def user_input(

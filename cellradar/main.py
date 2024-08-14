@@ -8,17 +8,18 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from predicting import iterate_predicting
-from segmentation import export_rois, iterate_segmentation
 from sklearn.pipeline import Pipeline
-from training import (
+
+from cellradar.predicting import iterate_predicting
+from cellradar.segmentation import export_rois, iterate_segmentation
+from cellradar.training import (
     label_rois,
     random_train_test_split,
     train_logreg,
     train_rf,
     train_svm,
 )
-from utils import build_project
+from cellradar.utils import build_project
 
 
 def analyze(

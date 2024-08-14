@@ -4,6 +4,7 @@
 
 import pickle as pkl
 from pathlib import Path
+from typing import Dict, Tuple
 
 import cv2
 import numpy as np
@@ -11,12 +12,13 @@ from csbdeep.utils import normalize
 from stardist import export_imagej_rois
 from stardist.models import StarDist2D
 from tqdm import tqdm
-from utils import compress, convert_to_roi, crop, get_layer
+
+from cellradar.utils import compress, convert_to_roi, crop, get_layer
 
 
 def iterate_segmentation(
     image_folder: Path,
-) -> tuple[dict[str, dict], dict[str, np.ndarray]]:
+) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
     """
     This function iterates over all `.tif` files in the given `image_folder`, applies a pre-trained StarDist model
     to segment the images, and extracts ROIs. The segmented layers and corresponding ROI data are stored in dictionaries
@@ -58,7 +60,7 @@ def iterate_segmentation(
     return rois, layers
 
 
-def export_rois(project_folder: Path, rois: dict[str, dict]) -> None:
+def export_rois(project_folder: Path, rois: Dict[str, Dict]) -> None:
     """
     This function saves the ROIs for each image into a separate `.pkl` file within the `rois_raw` directory
     inside the specified `project_folder`. Each file is named according to the image's tag (filename without extension).
@@ -85,7 +87,7 @@ def export_rois(project_folder: Path, rois: dict[str, dict]) -> None:
             pkl.dump(rois_dict, file)
 
 
-def segment_image(tif_path: Path, model: StarDist2D) -> tuple[np.ndarray, np.ndarray]:
+def segment_image(tif_path: Path, model: StarDist2D) -> Tuple[np.ndarray, np.ndarray]:
     """
     This function reads a TIFF image from the specified path, processes it by compressing, extracting the relevant layer,
     removing empty rows and columns, and normalizing the image. The processed image layer is then segmented using a
