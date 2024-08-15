@@ -64,7 +64,7 @@ def analyze(
     export_rois(project_folder, rois)
 
     # Apply the prediction model to the layers and ROIs
-    iterate_predicting(layers, rois, cmap, project_folder)
+    iterate_predicting(layers, rois, cmap, project_folder, best_model)
 
 
 def train(image_folder: Path, model_type: str = "svm"):
@@ -191,6 +191,3 @@ def expand_retrain(image_folder: Path, df: pd.DataFrame, model_type: str = "svm"
     print("Best cross-validation score: ", random_search.best_score_)
 
     return best_model, X_train, y_train, X_test, y_test
-
-
-
