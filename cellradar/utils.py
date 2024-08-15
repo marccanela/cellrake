@@ -6,47 +6,45 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from shapely.geometry import Polygon
-from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
-from skimage.measure import label, regionprops
 from PIL import Image, ImageDraw
-from skimage.feature import hog
+from shapely.geometry import Polygon
+from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
+from skimage.measure import label, regionprops
 
+# def get_layer(image: np.ndarray) -> np.ndarray:
+#     """
+#     This function checks if the image is 2D or 3D. If the image is 2D,
+#     it directly returns that layer. If the image is 3D, it finds the
+#     first layer that contains any non-zero values and returns it. If all
+#     layers are empty (i.e., all values are zero), the function returns `None`.
 
-def get_layer(image: np.ndarray) -> np.ndarray:
-    """
-    This function checks if the image is 2D or 3D. If the image is 2D,
-    it directly returns that layer. If the image is 3D, it finds the
-    first layer that contains any non-zero values and returns it. If all
-    layers are empty (i.e., all values are zero), the function returns `None`.
+#     Parameters:
+#     ----------
+#     image : numpy.ndarray
+#         A 2D or 3D NumPy array representing the image. The shape of the array
+#         should be (height, width) for single-layer images or (height, width, num_layers)
+#         for multi-layer images.
 
-    Parameters:
-    ----------
-    image : numpy.ndarray
-        A 2D or 3D NumPy array representing the image. The shape of the array
-        should be (height, width) for single-layer images or (height, width, num_layers)
-        for multi-layer images.
+#     Returns:
+#     -------
+#     numpy.ndarray or None
+#         The single 2D layer if the image only has one layer, the first 2D non-empty layer
+#         if the image is multi-layer, or `None` if all layers are empty.
+#     """
+#     if image.ndim == 2:
+#         return image
 
-    Returns:
-    -------
-    numpy.ndarray or None
-        The single 2D layer if the image only has one layer, the first 2D non-empty layer
-        if the image is multi-layer, or `None` if all layers are empty.
-    """
-    if image.ndim == 2:
-        return image
+#     # Sum the pixel values across the height and width for each layer
+#     layer_sums = np.sum(image, axis=(0, 1))
 
-    # Sum the pixel values across the height and width for each layer
-    layer_sums = np.sum(image, axis=(0, 1))
+#     # Find indices of layers that are non-zero
+#     non_zero_layer_indices = np.nonzero(layer_sums)[0]
 
-    # Find indices of layers that are non-zero
-    non_zero_layer_indices = np.nonzero(layer_sums)[0]
-
-    # Return the first non-empty layer or None if all layers are empty
-    if non_zero_layer_indices.size > 0:
-        return image[:, :, non_zero_layer_indices[0]]
-    else:
-        return None
+#     # Return the first non-empty layer or None if all layers are empty
+#     if non_zero_layer_indices.size > 0:
+#         return image[:, :, non_zero_layer_indices[0]]
+#     else:
+#         return None
 
 
 def build_project(image_folder: Path) -> Path:
@@ -522,27 +520,27 @@ def crop_cell_large(
 #     return cv2.resize(image, (width // compress_n, height // compress_n))
 
 
-# def crop(layer: np.ndarray) -> np.ndarray:
-#     """
-#     This function trims the input image layer to remove any rows or columns that contain only zero values.
+def crop(layer: np.ndarray) -> np.ndarray:
+    """
+    This function trims the input image layer to remove any rows or columns that contain only zero values.
 
-#     Parameters:
-#     ----------
-#     layer : numpy.ndarray
-#         A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
+    Parameters:
+    ----------
+    layer : numpy.ndarray
+        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
 
-#     Returns:
-#     -------
-#     numpy.ndarray
-#         The cropped image layer with zero-only rows and columns removed.
-#     """
-#     # Remove rows that are entirely zeros
-#     layer = layer[~np.all(layer == 0, axis=1)]
+    Returns:
+    -------
+    numpy.ndarray
+        The cropped image layer with zero-only rows and columns removed.
+    """
+    # Remove rows that are entirely zeros
+    layer = layer[~np.all(layer == 0, axis=1)]
 
-#     # Remove columns that are entirely zeros
-#     layer = layer[:, ~np.all(layer == 0, axis=0)]
+    # Remove columns that are entirely zeros
+    layer = layer[:, ~np.all(layer == 0, axis=0)]
 
-#     return layer
+    return layer
 
 
 def fix_polygon(polygon: Polygon) -> Polygon:

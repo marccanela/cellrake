@@ -6,10 +6,10 @@ import pickle as pkl
 from pathlib import Path
 from typing import Dict, Tuple
 
-from PIL import Image
-from scipy.ndimage import zoom
 import numpy as np
 from csbdeep.utils import normalize
+from PIL import Image
+from scipy.ndimage import zoom
 from stardist.models import StarDist2D
 from tqdm import tqdm
 

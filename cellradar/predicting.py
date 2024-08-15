@@ -10,19 +10,19 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from PIL import Image
+from scipy.ndimage import zoom
 from shapely.geometry import Polygon
 from skimage.measure import label, regionprops
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
-from PIL import Image
-from scipy.ndimage import zoom
 
 from cellradar.utils import (
     create_stats_dict,
     crop,
+    crop_cell_large,
     fix_polygon,
     get_cell_mask,
-    crop_cell_large,
 )
 
 
