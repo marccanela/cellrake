@@ -80,7 +80,7 @@ def user_input(
 
         # Cropped image with padding, ROI highlighted
         layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
-            layer, x_coords, y_coords, padding=250
+            layer, x_coords, y_coords, padding=120
         )
         axes[2].imshow(layer_cropped_small, cmap="Reds")
         axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
