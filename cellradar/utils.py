@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from shapely.geometry import Polygon
+from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
-from skimage.draw import polygon
 
 
 def build_project(image_folder: Path) -> Path:
@@ -96,16 +96,16 @@ def get_cell_mask(layer: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
         A binary mask of the same shape as `layer`. Pixels within the defined
         polygonal regions are set to `1`, and all other pixels are set to `0`.
     """
-    
+
     mask = np.zeros(layer.shape, dtype=np.uint8)
-    
+
     # Extract x and y coordinates separately
     r = coordinates[0, :, 1]  # y-coordinates
     c = coordinates[0, :, 0]  # x-coordinate
-    
+
     # Get the indices of the pixels that are inside the polygon
     rr, cc = polygon(r, c, mask.shape)
-    
+
     # Fill the mask
     mask[rr, cc] = 1
 
@@ -301,7 +301,11 @@ def extract_roi_stats(
     
     # Compute Histogram of Oriented Gradients (HOG) features
     h_values, _ = hog(
+<<<<<<< HEAD
         padded_image,
+=======
+        layer_cropped_masked,
+>>>>>>> 31afc9908a50bf105c6cd60d8e84e8ffa1ba4517
         orientations=9,
         pixels_per_cell=(pixels_per_cell_val, pixels_per_cell_val),
         cells_per_block=(cells_per_block_val, cells_per_block_val),
