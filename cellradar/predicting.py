@@ -345,7 +345,7 @@ def colocalize(
 
     # Create directory for colocalization results
     colocalization_folder_path = (
-        processed_rois_path_1.parent
+        processed_rois_path_1.parent.parent
         / f"colocalization_{images_path_1.stem}_{images_path_2.stem}"
     )
     colocalization_folder_path.mkdir(parents=True, exist_ok=True)
