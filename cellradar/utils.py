@@ -6,45 +6,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from PIL import Image, ImageDraw
 from shapely.geometry import Polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
-
-# def get_layer(image: np.ndarray) -> np.ndarray:
-#     """
-#     This function checks if the image is 2D or 3D. If the image is 2D,
-#     it directly returns that layer. If the image is 3D, it finds the
-#     first layer that contains any non-zero values and returns it. If all
-#     layers are empty (i.e., all values are zero), the function returns `None`.
-
-#     Parameters:
-#     ----------
-#     image : numpy.ndarray
-#         A 2D or 3D NumPy array representing the image. The shape of the array
-#         should be (height, width) for single-layer images or (height, width, num_layers)
-#         for multi-layer images.
-
-#     Returns:
-#     -------
-#     numpy.ndarray or None
-#         The single 2D layer if the image only has one layer, the first 2D non-empty layer
-#         if the image is multi-layer, or `None` if all layers are empty.
-#     """
-#     if image.ndim == 2:
-#         return image
-
-#     # Sum the pixel values across the height and width for each layer
-#     layer_sums = np.sum(image, axis=(0, 1))
-
-#     # Find indices of layers that are non-zero
-#     non_zero_layer_indices = np.nonzero(layer_sums)[0]
-
-#     # Return the first non-empty layer or None if all layers are empty
-#     if non_zero_layer_indices.size > 0:
-#         return image[:, :, non_zero_layer_indices[0]]
-#     else:
-#         return None
+from skimage.draw import polygon
 
 
 def build_project(image_folder: Path) -> Path:
@@ -131,17 +96,18 @@ def get_cell_mask(layer: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
         A binary mask of the same shape as `layer`. Pixels within the defined
         polygonal regions are set to `1`, and all other pixels are set to `0`.
     """
-    # Create a blank mask
-    mask = Image.new("L", layer.shape, 0)
-
-    # Create a draw object
-    draw = ImageDraw.Draw(mask)
-
-    # Draw the polygon on the mask (1 is the fill value)
-    draw.polygon(coordinates, outline=1, fill=1)
-
-    # Convert the mask to a numpy array if needed
-    mask = np.array(mask)
+    
+    mask = np.zeros(layer.shape, dtype=np.uint8)
+    
+    # Extract x and y coordinates separately
+    r = coordinates[0, :, 1]  # y-coordinates
+    c = coordinates[0, :, 0]  # x-coordinate
+    
+    # Get the indices of the pixels that are inside the polygon
+    rr, cc = polygon(r, c, mask.shape)
+    
+    # Fill the mask
+    mask[rr, cc] = 1
 
     return mask
 
@@ -492,32 +458,6 @@ def crop_cell_large(
     y_coords_cropped = [y - y_min for y in y_coords]
 
     return layer_cropped, x_coords_cropped, y_coords_cropped
-
-
-# def compress(image: np.ndarray, compress_n: int = 2) -> np.ndarray:
-#     """
-#     This function reduces the size of the input image by a factor specified by `compress_n`.
-#     The image is resized using bilinear interpolation, which is suitable for most image compression tasks.
-
-#     Parameters:
-#     ----------
-#     image : numpy.ndarray
-#         A 2D or 3D NumPy array representing the image to be compressed. The shape should be (height, width, channels) for color images.
-
-#     compress_n : int, optional
-#         The factor by which to reduce the image dimensions. The output dimensions will be the original dimensions divided by `compress_n`.
-#         The default value is 2, which halves the dimensions of the image.
-
-#     Returns:
-#     -------
-#     numpy.ndarray
-#         The resized image as a NumPy array. The shape of the output image will be (height // compress_n, width // compress_n) for grayscale
-#         images or (height // compress_n, width // compress_n, channels) for color images.
-#     """
-#     # Get the original dimensions
-#     height, width = image.shape[:2]
-
-#     return cv2.resize(image, (width // compress_n, height // compress_n))
 
 
 def crop(layer: np.ndarray) -> np.ndarray:
