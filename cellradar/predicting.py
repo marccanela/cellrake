@@ -75,7 +75,7 @@ def filter_roi(
             roi_area = prop.area
 
             # Filter based on area
-            if roi_area >= 1000:
+            if roi_area <= 250:
                 # Crop to the bounding box of the ROI
                 layer_cropped, x_coords_cropped, y_coords_cropped = crop_cell_large(
                     layer, x_coords, y_coords
@@ -400,10 +400,8 @@ def colocalize(
 
         image_path_1 = list(images_path_1.glob(f"*{tag}.tif"))[0]
 
-        image_1 = Image.open(image_path_1)
-        gray_image_1 = image_1.convert("L")
-        gray_image_1 = np.asarray(gray_image_1)
-        layer_1 = zoom(gray_image_1, zoom=0.5, order=1)
+        image_1 = np.asarray(Image.open(image_path_1))
+        layer_1 = zoom(image_1, zoom=0.5, order=1)
         layer_1 = crop(layer_1)
         axes[0].imshow(layer_1, cmap="Greens", vmin=0, vmax=255)
         axes[0].set_title(f"Original {images_path_1.stem} image")
@@ -416,10 +414,8 @@ def colocalize(
         axes[1].axis("off")
 
         image_path_2 = list(images_path_2.glob(f"*{tag}.tif"))[0]
-        image_2 = Image.open(image_path_2)
-        gray_image_2 = image_2.convert("L")
-        gray_image_2 = np.asarray(gray_image_2)
-        layer_2 = zoom(gray_image_2, zoom=0.5, order=1)
+        image_2 = np.asarray(Image.open(image_path_2))
+        layer_2 = zoom(image_2, zoom=0.5, order=1)
         layer_2 = crop(layer_2)
         axes[2].imshow(layer_2, cmap="Reds", vmin=0, vmax=255)
         axes[2].set_title(f"Original {images_path_2.stem} image")

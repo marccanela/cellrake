@@ -278,17 +278,38 @@ def extract_roi_stats(
     # Calculate region properties
     prop = regionprops(label(cell_mask_cropped))[0]
 
+    height, width = layer_cropped_masked.shape[:2]
+    pixels_per_cell_val = 4
+    cells_per_block_val = 2
+    
+    # Set the required minimum size based on the HOG parameters
+    min_height = pixels_per_cell_val * cells_per_block_val
+    min_width = pixels_per_cell_val * cells_per_block_val
+    
+    # Calculate the amount of padding needed
+    pad_height = max(0, min_height - height)
+    pad_width = max(0, min_width - width)
+    
+    # Apply padding to the image
+    if pad_height > 0 or pad_width > 0:
+        padded_image = np.pad(layer_cropped_masked, 
+                              ((0, pad_height), (0, pad_width)), 
+                              mode='constant', 
+                              constant_values=0)
+    else:
+        padded_image = layer_cropped_masked
+    
     # Compute Histogram of Oriented Gradients (HOG) features
-    h_values, hog_image = hog(
-        layer_masked,
+    h_values, _ = hog(
+        padded_image,
         orientations=9,
-        pixels_per_cell=(8, 8),
-        cells_per_block=(2, 2),
+        pixels_per_cell=(pixels_per_cell_val, pixels_per_cell_val),
+        cells_per_block=(cells_per_block_val, cells_per_block_val),
         block_norm="L2-Hys",
         visualize=True,
         feature_vector=True,
     )
-
+        
     # Flatten the HOG features if needed (though skimage.hog already returns a flat array if feature_vector=True)
     hog_descriptor_values = h_values.flatten()
 

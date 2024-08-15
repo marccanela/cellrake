@@ -109,14 +109,10 @@ def segment_image(tif_path: Path, model: StarDist2D) -> Tuple[np.ndarray, np.nda
         - `layer`: The processed 2D image layer from which the polygons were extracted.
     """
     # Read the image in its original form (unchanged)
-    pil_image = Image.open(tif_path)
-
-    # Extract the relevant layer from the image
-    gray_pil_image = pil_image.convert("L")  # L ("Luminance") stands for grayscale
-    gray_img = np.asarray(gray_pil_image)
+    pil_image = np.asarray(Image.open(tif_path))
 
     # Compress the image
-    layer = zoom(gray_img, zoom=0.5, order=1)
+    layer = zoom(pil_image, zoom=0.5, order=1)
 
     # Eliminate rows and columns that are entirely zeros
     layer = crop(layer)
