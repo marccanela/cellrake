@@ -1,19 +1,8 @@
----
-title: Cell Radar 📡🔬
-subject: Tutorial
-subtitle: A package for analyzing cells in fluorescent images
-short_title: Cell Radar Tutorial
-authors:
-  - name: Marc Canela
-    affiliations:
-      - Hospital del Mar Research Institute
-    orcid: 0000-0002-6248-4202
-    email: mcanela@researchmar.net
-license: MIT License
----
+# CellRadar 📡🔬
+
 ## Why this package?
 
-**Cell Radar** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation, model training, and predictions on new data.
+**Cell Radar** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [StarDist](https://github.com/stardist/stardist), model training based and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
 
 ## Installation
 
@@ -27,30 +16,13 @@ pip install -i https://test.pypi.org/simple/ cellradar==0.1.0
 
 Make sure you have the required dependencies installed. You can find them in `pyproject.toml`.
 
-## Quick Start
+## How to use it?
 
-Here’s a quick example to get you started:
+For detailed tutorials and use cases, see the [examples](./examples) directory:
 
-## Usage
-### Utilities
-
-The `utils` module contains helper functions for loading images, preprocessing data, and more.
-
-### Segmentation
-
-The `segmentation` module provides tools for segmenting cells from images using [StarDist](https://github.com/stardist/stardist). See also [](10.1007/978-3-030-00934-2_30), [](10.1109/WACV45572.2020.9093435), and [](10.1109/ISBIC56247.2022.9854534).
-
-### Training
-
-The `training` module allows you to train models on your segmented cell data.
-
-### Predicting
-
-The `predicting` module is used for making predictions on new cell data using trained models.
-
-## Examples
-
-Check out the `examples` directory for more detailed tutorials and use cases.
+- [Training Models](./examples/1_training_models.ipynb): Learn how to train a machine learning model using your dataset.
+- [Analyzing Images](./examples/2_analyzing_images.ipynb): Analyze new images using a pre-trained model.
+- [Colocalization Analysis](./examples/2_analyzing_images.ipynb): Perform colocalization analysis on multi-marker images.
 
 ## License
 
