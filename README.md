@@ -1,8 +1,8 @@
-# CellRadar 📡🔬
+# CellRake 🔬
 
 ## Why this package?
 
-**Cell Radar** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [StarDist](https://github.com/stardist/stardist), model training based and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
+**CellRake** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [StarDist](https://github.com/stardist/stardist), model training based and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
 
 ## Installation
 
@@ -18,39 +18,39 @@ Miniconda is a minimal version of Anaconda that includes only Conda, Python, and
 
 ### Step 2: Create a Conda Environment
 
-A Conda environment is an isolated space where you can install specific versions of Python and packages, like CellRadar, without affecting other projects or installations. This is important to avoid conflicts between different software packages.
+A Conda environment is an isolated space where you can install specific versions of Python and packages, like CellRake, without affecting other projects or installations. This is important to avoid conflicts between different software packages.
 
-To create a new Conda environment for **CellRadar**, open a terminal and run the following commands:
+To create a new Conda environment for **CellRake**, open a terminal and run the following commands:
 
 ```console
-conda create --name cellradar python=3.9
+conda create --name cellrake python=3.9
 ```
 
-This command creates a new environment named `cellradar` with Python 3.9 installed.
+This command creates a new environment named `cellrake` with Python 3.9 installed.
 
 ### Step 3: Activate the Conda Environment
 
-Before installing the CellRadar package, you need to activate the Conda environment you just created. This tells your system to use the Python and packages installed in that environment.
+Before installing the CellRake package, you need to activate the Conda environment you just created. This tells your system to use the Python and packages installed in that environment.
 
 To activate the environment, run:
 
 ```console
-conda activate cellradar
+conda activate cellrake
 ````
 
-After running this command, your terminal prompt should change to indicate that you're now working within the `cellradar` environment.
+After running this command, your terminal prompt should change to indicate that you're now working within the `cellrake` environment.
 
-### Step 4: Install CellRadar
+### Step 4: Install CellRake
 
-Now that your environment is set up and activated, you can install **CellRadar**. The package is hosted on PyPI.
+Now that your environment is set up and activated, you can install **CellRake**. The package is hosted on PyPI.
 
-To install CellRadar, run the following command:
+To install CellRake, run the following command:
 
 ```console
-pip install -i https://test.pypi.org/simple/ cellradar
+pip install -i https://test.pypi.org/simple/ cellrake
 ```
 
-This command tells pip to install CellRadar from the PyPI repository. Now you are ready to go!
+This command tells pip to install CellRake from the PyPI repository. Now you are ready to go!
 
 ## How to use it?
 
@@ -62,4 +62,4 @@ For detailed tutorials and use cases, see the [examples](./examples) directory:
 
 ## License
 
-**Cell Radar** is licensed under the [MIT License](https://opensource.org/license/MIT).
+**CellRake** is licensed under the [MIT License](https://opensource.org/license/MIT).
