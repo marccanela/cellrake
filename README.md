@@ -6,15 +6,51 @@
 
 ## Installation
 
-To install **Cell Radar**, you can clone the repository and install it using `pip`:
+### Step 1: Install Conda
 
-```bash
-git clone https://github.com/marccanela/cellradar.git
-cd cellradar
-pip install -i https://test.pypi.org/simple/ cellradar==0.1.0
+First, you need to install Conda, a package and environment management system. If you don't have Conda installed, you can download and install it by following these steps:
+
+1. Go to the [Miniconda download page](https://docs.anaconda.com/miniconda/miniconda-install/).
+2. Choose the version for your operating system (Windows, macOS, or Linux).
+3. Follow the installation instructions provided on the website.
+
+Miniconda is a minimal version of Anaconda that includes only Conda, Python, and a few essential packages, making it lightweight and easy to manage.
+
+### Step 2: Create a Conda Environment
+
+A Conda environment is an isolated space where you can install specific versions of Python and packages, like CellRadar, without affecting other projects or installations. This is important to avoid conflicts between different software packages.
+
+To create a new Conda environment for **CellRadar**, open a terminal and run the following commands:
+
+```console
+conda create --name cellradar python=3.9
 ```
 
-Make sure you have the required dependencies installed. You can find them in `pyproject.toml`.
+This command creates a new environment named `cellradar` with Python 3.9 installed.
+
+### Step 3: Activate the Conda Environment
+
+Before installing the CellRadar package, you need to activate the Conda environment you just created. This tells your system to use the Python and packages installed in that environment.
+
+To activate the environment, run:
+
+```console
+conda activate cellradar
+````
+
+After running this command, your terminal prompt should change to indicate that you're now working within the `cellradar` environment.
+
+### Step 4: Install CellRadar
+
+Now that your environment is set up and activated, you can install **CellRadar**. The package is hosted on PyPI.
+
+To install CellRadar, run the following command:
+
+```console
+pip install -i https://test.pypi.org/simple/ cellradar
+```
+
+This command tells pip to install CellRadar from the PyPI repository. Now you are ready to go!
 
 ## How to use it?
 
