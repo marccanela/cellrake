@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cellrake"
-version = "0.1.6"
+version = "0.1.0"
 authors = [
   { name="Marc Canela", email="mcanela@researchmar.net" },
 ]
@@ -22,6 +22,7 @@ classifiers = [
 ]
 keywords = ["image", "fluorescence", "cFos", "tdTomato", "immunohistochemistry", "count cells", "colocalization"]
 dependencies = [
+    "matplotlib"
     "pandas",
     "scikit-learn",
     "Pillow",
@@ -34,8 +35,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=6.2.0,<7.0.0",
-    "black>=22.0.0,<23.0.0"
+    "pytest",
+    "black"
 ]
 
 [project.urls]
