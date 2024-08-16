@@ -23,7 +23,7 @@ A Conda environment is an isolated space where you can install specific versions
 To create a new Conda environment for **CellRake**, open a terminal and run the following commands:
 
 ```console
-conda create --name cellrake python=3.9
+conda create --name cellrake python=3.10
 ```
 
 This command creates a new environment named `cellrake` with Python 3.9 installed.
