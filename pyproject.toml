@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cellrake"
-version = "0.1.3"
+version = "0.1.4"
 authors = [
   { name="Marc Canela", email="mcanela@researchmar.net" },
 ]
@@ -25,13 +25,9 @@ dependencies = [
     "matplotlib>=3.3.0,<4.0.0",
     "pandas>=1.1.0,<2.0.0",
     "scikit-learn>=0.24.0,<1.0.0",
-    "numpy>=1.19.0,<2.0.0",
     "Pillow>=8.0.0,<10.0.0",
-    "scipy>=1.5.0,<2.0.0",
     "shapely>=1.7.0,<2.0.0",
-    "scikit-image>=0.17.0,<1.0.0",
     "tqdm>=4.50.0,<5.0.0",
-    "csbdeep=0.8.0,
     "stardist>=0.8.0,<0.10.0",
     "openpyxl>=3.0.0,<4.0.0",
     "tensorflow>=2.4.0,<3.0.0"
