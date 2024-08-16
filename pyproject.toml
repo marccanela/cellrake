@@ -8,7 +8,7 @@ version = "0.1.0"
 authors = [
   { name="Marc Canela", email="mcanela@researchmar.net" },
 ]
-description = "A package for analyzing cells in fluorescent images"
+description = "A Python package for analyzing cells in fluorescent images"
 readme = "README.md"
 requires-python = ">=3.9,<3.11"
 license = {text = "MIT License"}
@@ -22,7 +22,7 @@ classifiers = [
 ]
 keywords = ["image", "fluorescence", "cFos", "tdTomato", "immunohistochemistry", "count cells", "colocalization"]
 dependencies = [
-    "matplotlib"
+    "matplotlib",
     "pandas",
     "scikit-learn",
     "Pillow",

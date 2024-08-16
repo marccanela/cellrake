@@ -1,5 +1,7 @@
 # CellRake 🔬
 
+<img src="./CellRake.svg" style="width: 100%;" alt="CellRake">
+
 ## Why this package?
 
 **CellRake** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [StarDist](https://github.com/stardist/stardist), model training based and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
@@ -47,7 +49,7 @@ Now that your environment is set up and activated, you can install **CellRake**.
 To install CellRake, run the following command:
 
 ```console
-pip install -i https://test.pypi.org/simple/ cellrake
+pip install cellrake
 ```
 
 This command tells pip to install CellRake from the PyPI repository. Now you are ready to go!
