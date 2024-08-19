@@ -417,7 +417,10 @@ def evaluate(
             "score": [precision, recall, f1, roc],
         }
     )
-    evaluate_path = image_folder.parent / "evaluation.csv"
+    for name, value in globals().items():
+        if value is X:
+            tag = name
+    evaluate_path = image_folder.parent / f"evaluation_{tag}.csv"
     metrics_df.to_csv(evaluate_path, index=False)
 
     # Print confusion matrix
