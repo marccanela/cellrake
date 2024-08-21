@@ -284,7 +284,9 @@ def iterate_predicting(
     """
     results = []
 
-    for tag in tqdm(rois.keys(), desc="Applying prediction model", unit="image"):
+    for tag in tqdm(
+        rois.keys(), desc="Identifying positive segmentations", unit="image"
+    ):
         try:
             # Analyze ROIs and get the filtered list
             keeped = analyze_image(tag, layers, rois, cmap, project_folder, best_model)
