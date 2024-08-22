@@ -54,6 +54,12 @@ pip install cellrake
 
 This command tells pip to install CellRake from the PyPI repository. Now you are ready to go!
 
+**Note:** If you installed the package some time ago, I recommend to update to the newest version to avoid bugs. You can do this by running:
+
+```bash
+pip install cellrake --upgrade
+```
+
 ## How to use it?
 
 For detailed tutorials and use cases, see the [examples](./examples) directory:
