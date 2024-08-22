@@ -261,7 +261,9 @@ def extract_roi_stats(
     cell_pixels = layer[cell_mask == 1]
     cell_pixels_mean = np.mean(cell_pixels)
     background_pixels = layer_cropped[background_mask_cropped == 1]
-    background_pixels_mean = np.mean(background_pixels) if background_pixels.size > 0 else cell_pixels_mean
+    background_pixels_mean = (
+        np.mean(background_pixels) if background_pixels.size > 0 else cell_pixels_mean
+    )
 
     # Mask the cropped layer and calculate texture features
     layer_cropped_masked = layer_cropped * cell_mask_cropped

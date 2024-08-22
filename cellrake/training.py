@@ -410,6 +410,12 @@ def evaluate(
     f1 = f1_score(y, y_pred)
     roc = roc_auc_score(y, y_scores)
 
+    # Print metrics
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    print(f"f1: {f1}")
+    print(f"ROC-AUC: {roc}")
+
     # Save metrics to CSV
     metrics_df = pd.DataFrame(
         {

@@ -64,6 +64,11 @@ def analyze(
     export_rois(project_folder, rois)
 
     # Apply the prediction model to the layers and ROIs
+    if best_model:
+        print("Applying a trained model to make predictions...")
+    else:
+        print("Lacking a trained model. Applying basic intensity threshold...")
+
     iterate_predicting(layers, rois, cmap, project_folder, best_model)
 
 

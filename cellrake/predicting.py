@@ -77,9 +77,7 @@ def filter_roi(
             # Filter based on area
             if roi_area <= 250:
                 # Crop to the bounding box of the ROI
-                layer_cropped, x_coords_cropped, y_coords_cropped = crop_cell_large(
-                    layer, x_coords, y_coords
-                )
+                layer_cropped, _, _ = crop_cell_large(layer, x_coords, y_coords)
                 cell_mask_cropped = crop_cell_large(cell_mask, x_coords, y_coords)[0]
                 background_mask_cropped = 1 - cell_mask_cropped
 
@@ -93,7 +91,7 @@ def filter_roi(
                     background_pixels_mean if background_pixels_mean != 0 else 1
                 )
 
-                if mean_ratio > 0:
+                if mean_ratio > 1:
                     first_kept[roi_name] = roi_info
                     cell_background_ratios[roi_name] = mean_ratio
 
