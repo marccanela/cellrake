@@ -150,51 +150,6 @@ def crop_cell(
     return layer[y_min : y_max + 1, x_min : x_max + 1]
 
 
-def convert_to_roi(
-    polygon: Polygon, layer: np.ndarray
-) -> Dict[str, Dict[str, np.ndarray]]:
-    """
-    This function extracts the coordinates of the polygons and converts them into ROIs.
-    It clips the coordinates to ensure they lie within the bounds of the given image layer.
-
-    Parameters:
-    ----------
-    polygon : shapely.geometry.Polygon
-        A Polygon object containing the coordinates of the regions of interest.
-
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of the array should be
-        (height, width).
-
-    Returns:
-    -------
-    dict
-        A dictionary where each key is a string identifier for an ROI ("roi_0", "roi_1", etc.),
-        and each value is another dictionary with 'x' and 'y' keys containing the clipped
-        x and y coordinates of the ROI.
-    """
-    # Extract coordinates from the Polygon object
-    polygon_coord = polygon["coord"]
-
-    # Extract dimensions of the layer
-    layer_height, layer_width = layer.shape
-
-    # Iterate
-    rois_dict = {}
-    for n in range(polygon_coord.shape[0]):
-        roi_y = polygon_coord[n, 0, :]
-        roi_x = polygon_coord[n, 1, :]
-
-        # Clip the coordinates to be within the bounds of the layer
-        roi_y = np.clip(roi_y, 0, layer_height - 1)
-        roi_x = np.clip(roi_x, 0, layer_width - 1)
-
-        # Store the clipped coordinates in the dictionary
-        rois_dict[f"roi_{n}"] = {"x": roi_x, "y": roi_y}
-
-    return rois_dict
-
-
 def extract_roi_stats(
     layer: np.ndarray, roi_info: Dict[str, Any]
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
