@@ -26,121 +26,6 @@ from cellrake.utils import (
 )
 
 
-def filter_roi(
-    layer: np.ndarray,
-    roi_dict: Dict[str, Dict[str, np.ndarray]],
-    cell_background_threshold: Optional[float] = None,
-) -> Dict[str, Dict[str, np.ndarray]]:
-    """
-    This function evaluates and filters ROIs based on their size and ratios.
-    ROIs are initially pre-selected based on their area, and then further
-    filtered based on a ratio threshold if specified.
-
-    Parameters:
-    ----------
-    layer : np.ndarray
-        A 2D NumPy array representing the image layer from which ROIs are
-        extracted. The array should be of shape (height, width).
-
-    roi_dict : dict
-        A dictionary where keys are ROI names and values are dictionaries with,
-        at least, the following keys:
-        - "x": A list or array of x-coordinates of the ROI vertices.
-        - "y": A list or array of y-coordinates of the ROI vertices.
-
-    cell_background_threshold : float, optional
-        A threshold ratio for the cell-to-background pixel mean value. Only
-        ROIs with a mean ratio above this threshold are kept. If None, all
-        pre-selected ROIs are returned.
-
-    Returns:
-    -------
-    dict
-        A dictionary where keys are ROI names and values are dictionaries
-        containing ROI information.
-    """
-    first_kept = {}
-    cell_background_ratios = {}
-    final_kept = {}
-
-    for roi_name, roi_info in roi_dict.items():
-        x_coords, y_coords = roi_info["x"], roi_info["y"]
-        coordinates = np.array([list(zip(x_coords, y_coords))], dtype=np.int32)
-        cell_mask = get_cell_mask(layer, coordinates)
-
-        # Pre-select ROIs based on area
-        props = regionprops(label(cell_mask))
-        if props:
-            prop = props[0]
-            roi_area = prop.area
-
-            # Filter based on area
-            if roi_area <= 250:
-                # Crop to the bounding box of the ROI
-                layer_cropped, _, _ = crop_cell_large(layer, x_coords, y_coords)
-                cell_mask_cropped = crop_cell_large(cell_mask, x_coords, y_coords)[0]
-                background_mask_cropped = 1 - cell_mask_cropped
-
-                cell_pixels = layer_cropped[cell_mask_cropped == 1]
-                background_pixels = layer_cropped[background_mask_cropped == 1]
-
-                # Calculate the mean ratio
-                cell_pixels_mean = np.mean(cell_pixels)
-                background_pixels_mean = np.mean(background_pixels)
-                mean_ratio = cell_pixels_mean / (
-                    background_pixels_mean if background_pixels_mean != 0 else 1
-                )
-
-                if mean_ratio > 1:
-                    first_kept[roi_name] = roi_info
-                    cell_background_ratios[roi_name] = mean_ratio
-
-    if cell_background_threshold is None:
-        return first_kept
-    else:
-        for roi_name, mean_ratio in cell_background_ratios.items():
-            if mean_ratio >= cell_background_threshold:
-                final_kept[roi_name] = first_kept[roi_name]
-        return final_kept
-
-
-def analyze_roi(
-    roi_name: str, roi_stats: Dict[str, float], best_model: BaseEstimator
-) -> Optional[str]:
-    """
-    This function analyzes a ROI based on its features and a pretrained model
-    to determine if the ROI meets certain criteria. The model's prediction indicates
-    whether the ROI should be considered based on the criteria.
-
-    Parameters:
-    ----------
-    roi_name : str
-        The name or identifier of the ROI being analyzed.
-
-    roi_stats : dict
-        A dictionary containing the features (stats and textures) of the ROI.
-        The dictionary should have feature names as keys and their corresponding values.
-
-    best_model : BaseEstimator
-        A trained model with a `predict` method that takes a feature array as
-        input and returns a prediction. The model should be compatible with `sklearn`'s `predict` method.
-
-    Returns:
-    -------
-    Optional[str]
-        The ROI name if the model predicts that the ROI meets the criteria (label == 1);
-        otherwise, returns `None`.
-    """
-    # Convert ROI stats dictionary to a feature array
-    feature_array = np.array(list(roi_stats.values())).reshape(1, -1)
-
-    # Predict using the model
-    prediction = best_model.predict(feature_array)
-
-    # Check if the prediction is for class 1
-    return roi_name if prediction[0] == 1 else None
-
-
 def analyze_image(
     tag: str,
     layers: Dict[str, np.ndarray],
@@ -150,7 +35,7 @@ def analyze_image(
     best_model: Optional[BaseEstimator],
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """
-    This function analyzes an image by processing ROIs, classifying them using a model if provided,
+    This function analyzes an image by processing ROIs, classifying them using a model,
     and visualizing the results.
 
     Parameters:
@@ -173,8 +58,7 @@ def analyze_image(
         The directory where the processed ROIs and visualizations will be saved.
 
     best_model : Optional[BaseEstimator]
-        A trained model with a `predict` method for classifying ROIs. If `None`,
-        a default filtering approach is used.
+        A trained model with a `predict` method for classifying ROIs.
 
     Returns:
     -------
@@ -184,27 +68,30 @@ def analyze_image(
     """
     # Load the ROI information and image layer
     roi_dict = rois[tag]
+    roi_dict = {f"{tag}_{key}": value for key, value in roi_dict.items()}
     layer = layers[tag]
 
-    # Process ROIs
-    if best_model:
-        # Extract features and classify ROIs using the model
-        roi_props = create_stats_dict(roi_dict, layer)
-        results = {
-            roi_name: analyze_roi(roi_name, roi_stats, best_model)
-            for roi_name, roi_stats in roi_props.items()
-        }
+    # Process ROIs: extract features
+    roi_props = create_stats_dict(roi_dict, layer)
 
-        # Keep ROIs that the model classifies as positive
-        keeped = {
-            roi_name: roi_dict[roi_name]
-            for roi_name, result in results.items()
-            if result
-        }
+    input_df = pd.DataFrame.from_dict(roi_props, orient="index")
+    input_df["min_intensity"] = input_df["min_intensity"].astype(int)
+    input_df["max_intensity"] = input_df["max_intensity"].astype(int)
+    input_df["hog_mean"] = input_df["hog_mean"].astype(float)
+    input_df["hog_std"] = input_df["hog_std"].astype(float)
+    input_X = input_df.values
 
-    else:
-        # Filter ROIs based on a default criterion if no model is provided
-        keeped = filter_roi(layer, roi_dict, cell_background_threshold=1.1)
+    # Classify ROIs using the model
+    prediction = best_model.predict(input_X)
+    input_names = input_df.index
+    results = dict(zip(input_names, prediction))
+
+    # Keep ROIs that the model classifies as positive
+    keeped = {
+        roi_name: roi_dict[roi_name]
+        for roi_name, result in results.items()
+        if result == 1
+    }
 
     # Export the processed ROIs
     processed_folder = project_folder / "rois_processed"
@@ -214,7 +101,7 @@ def analyze_image(
         pkl.dump(keeped, file)
 
     # Plot results
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    _, axes = plt.subplots(1, 2, figsize=(12, 6))
 
     # Plot original image
     axes[0].imshow(layer, cmap=cmap, vmin=0, vmax=255)
@@ -243,7 +130,7 @@ def iterate_predicting(
     rois: Dict[str, Dict[str, np.ndarray]],
     cmap: mcolors.Colormap,
     project_folder: Path,
-    best_model: Optional[BaseEstimator],
+    best_model: BaseEstimator,
 ) -> None:
     """
     This function processes each image by identifying positive ROIs using
@@ -266,9 +153,8 @@ def iterate_predicting(
     project_folder : Path
         The path to the folder where results will be saved.
 
-    best_model : Optional[BaseEstimator]
-        A trained model with a `predict` method for classifying ROIs. If `None`,
-        a default filtering approach is used.
+    best_model : BaseEstimator
+        A trained model with a `predict` method for classifying ROIs.
 
     Returns:
     -------

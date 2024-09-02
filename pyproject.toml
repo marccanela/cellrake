@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cellrake"
-version = "0.1.2"
+version = "0.2.0"
 authors = [
   { name="Marc Canela", email="mcanela@researchmar.net" },
 ]
@@ -28,9 +28,9 @@ dependencies = [
     "Pillow",
     "shapely",
     "tqdm",
-    "stardist",
     "openpyxl",
-    "tensorflow"
+    "scipy",
+    "scikit-image"
 ]
 
 [project.optional-dependencies]

@@ -3,28 +3,18 @@
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import uniform
+from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    confusion_matrix,
-    f1_score,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
-from sklearn.model_selection import (
-    RandomizedSearchCV,
-    cross_val_predict,
-    train_test_split,
-)
+from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -33,9 +23,7 @@ from tqdm import tqdm
 from cellrake.utils import create_stats_dict, crop_cell_large
 
 
-def user_input(
-    roi_dict: Dict[str, Dict[str, np.ndarray]], layer: np.ndarray
-) -> Dict[str, Dict[str, int]]:
+def user_input(roi_values: np.ndarray, layer: np.ndarray) -> Dict[str, Dict[str, int]]:
     """
     This function visually displays each ROI overlaid on the image layer and
     prompts the user to classify the ROI as either a cell (1) or non-cell (0).
@@ -61,55 +49,53 @@ def user_input(
         a key "label" and an integer value representing the user's classification:
         1 for cell, 0 for non-cell.
     """
-    labels = {}
+    x_coords, y_coords = roi_values["x"], roi_values["y"]
 
-    for roi_name, roi_info in roi_dict.items():
-        x_coords, y_coords = roi_info["x"], roi_info["y"]
+    # Set up the plot with four subplots
+    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
 
-        # Set up the plot with four subplots
-        fig, axes = plt.subplots(1, 4, figsize=(16, 5))
+    # Full image with ROI highlighted
+    axes[0].imshow(layer, cmap="Reds")
+    axes[0].plot(x_coords, y_coords, "b-", linewidth=1)
+    axes[0].axis("off")  # Hide the axis
 
-        # Full image with ROI highlighted
-        axes[0].imshow(layer, cmap="Reds")
-        axes[0].plot(x_coords, y_coords, "b-", linewidth=1)
-        axes[0].axis("off")  # Hide the axis
+    # Full image without ROI highlighted
+    axes[1].imshow(layer, cmap="Reds")
+    axes[1].axis("off")  # Hide the axis
 
-        # Full image without ROI highlighted
-        axes[1].imshow(layer, cmap="Reds")
-        axes[1].axis("off")  # Hide the axis
+    # Cropped image with padding, ROI highlighted
+    layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
+        layer, x_coords, y_coords, padding=120
+    )
+    axes[2].imshow(layer_cropped_small, cmap="Reds")
+    axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
+    axes[2].axis("off")  # Hide the axis
 
-        # Cropped image with padding, ROI highlighted
-        layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
-            layer, x_coords, y_coords, padding=120
-        )
-        axes[2].imshow(layer_cropped_small, cmap="Reds")
-        axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
-        axes[2].axis("off")  # Hide the axis
+    # Cropped image without ROI highlighted
+    axes[3].imshow(layer_cropped_small, cmap="Reds")
+    axes[3].axis("off")  # Hide the axis
 
-        # Cropped image without ROI highlighted
-        axes[3].imshow(layer_cropped_small, cmap="Reds")
-        axes[3].axis("off")  # Hide the axis
+    plt.tight_layout()
+    plt.show()
+    plt.pause(0.1)
 
-        plt.tight_layout()
-        plt.show()
-        plt.pause(0.1)
+    # Ask for user input
+    user_input_value = input("Please enter 1 (cell) or 0 (non-cell): ")
+    while user_input_value not in ["1", "0"]:
+        user_input_value = input("Invalid input. Please enter 1 or 0: ")
 
-        # Ask for user input
-        user_input_value = input("Please enter 1 (cell) or 0 (non-cell): ")
-        while user_input_value not in ["1", "0"]:
-            user_input_value = input("Invalid input. Please enter 1 or 0: ")
+    plt.close(fig)
 
-        labels[roi_name] = {"label": int(user_input_value)}
-        plt.close(fig)
-
-    return labels
+    return user_input_value
 
 
-def label_rois(rois: Dict[str, dict], layers: Dict[str, np.ndarray]) -> pd.DataFrame:
+def create_subset_df(
+    rois: Dict[str, dict], layers: Dict[str, np.ndarray]
+) -> pd.DataFrame:
     """
     This function processes the provided ROIs by calculating various statistical and texture features
-    for each ROI in each image layer. It then prompts the user to label each ROI as a cell or non-cell.
-    Finally, the features and labels are combined into a DataFrame for further analysis or model training.
+    for each ROI in each image layer. It clusters the features into two groups (approx. positive and
+    negative ROIs) and returns a sample dataframe of features with a balanced number of both clusters.
 
     Parameters:
     ----------
@@ -124,85 +110,269 @@ def label_rois(rois: Dict[str, dict], layers: Dict[str, np.ndarray]) -> pd.DataF
     Returns:
     -------
     pd.DataFrame
-        A DataFrame where each row corresponds to an ROI and contains its features and label.
+        A DataFrame where each row corresponds to an ROI and each column contains its features.
     """
 
-    # Step 1: Extract statistical features from each ROI
+    # Extract statistical features from each ROI
     roi_props_dict = {}
     for tag in tqdm(rois.keys(), desc="Extracting input features", unit="image"):
         roi_dict = rois[tag]
         layer = layers[tag]
         roi_props_dict[tag] = create_stats_dict(roi_dict, layer)
 
-    # Step 2: Flatten the dictionary structure for input features
+    # Flatten the dictionary structure for input features
     input_features = {}
     for tag, all_rois in roi_props_dict.items():
         for roi_num, stats in all_rois.items():
             input_features[f"{tag}_{roi_num}"] = stats
+    features_df = pd.DataFrame.from_dict(input_features, orient="index")
 
-    # Step 3: Collect user labels for each ROI
-    labels_dict = {}
-    for tag in rois.keys():
-        roi_dict = rois[tag]
-        layer = layers[tag]
-        labels_dict[tag] = user_input(roi_dict, layer)
+    # Cluster the features to aproximate the positive/negative classes
+    kmeans_2_pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=0.95, random_state=42)),
+            ("kmeans", KMeans(n_clusters=2, random_state=42)),
+        ]
+    )
+    best_clusters = kmeans_2_pipeline.fit_predict(features_df)
+    features_df["cluster"] = best_clusters
 
-    # Step 4: Flatten the dictionary structure for labels
-    input_labels = {}
-    for tag, all_labels in labels_dict.items():
-        for roi_num, labels in all_labels.items():
-            input_labels[f"{tag}_{roi_num}"] = labels
+    # Equilibrate both classes
+    cluster_counts = features_df["cluster"].value_counts()
+    size = np.min(cluster_counts)
 
-    # Step 5: Combine the features and labels into a DataFrame
-    data = {}
-    for key in set(input_features.keys()).union(input_labels.keys()):
-        if key in input_features and key in input_labels:
-            data[key] = {**input_features[key], **input_labels[key]}
+    sampled_dfs = []
+    for cluster in features_df["cluster"].unique():
+        cluster_df = features_df[features_df["cluster"] == cluster]
 
-    df = pd.DataFrame.from_dict(data, orient="index")
+        if len(cluster_df) >= size:
+            sampled_df = cluster_df.sample(n=size, random_state=42)
+        else:
+            sampled_df = cluster_df
+
+        sampled_dfs.append(sampled_df)
+
+    subset_df = pd.concat(sampled_dfs)
 
     # Ensure specific columns have the correct data types
-    df["min_intensity"] = df["min_intensity"].astype(int)
-    df["max_intensity"] = df["max_intensity"].astype(int)
-    df["hog_mean"] = df["hog_mean"].astype(float)
-    df["hog_std"] = df["hog_std"].astype(float)
+    subset_df["min_intensity"] = subset_df["min_intensity"].astype(int)
+    subset_df["max_intensity"] = subset_df["max_intensity"].astype(int)
+    subset_df["hog_mean"] = subset_df["hog_mean"].astype(float)
+    subset_df["hog_std"] = subset_df["hog_std"].astype(float)
 
-    return df
+    return subset_df
 
 
-def random_train_test_split(
-    df: pd.DataFrame, test_size: float = 0.2
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def active_learning(
+    subset_df: pd.DataFrame,
+    rois: Dict[str, dict],
+    layers: Dict[str, np.ndarray],
+    model_type: str = "svm",
+) -> Union[Pipeline, RandomForestClassifier]:
     """
-    This function splits a DataFrame into random train and test subsets.
+    The function begins by splitting the dataset into training and testing sets, with a small
+    portion of the training set manually labeled. It then enters a loop where the model is trained,
+    evaluated, and used to predict the uncertainty of the unlabeled instances. The most uncertain
+    instances are selected for manual labeling, added to the labeled dataset, and the process repeats
+    until the improvement in model performance becomes negligible.
 
     Parameters:
     ----------
-    df : pd.DataFrame
-        The DataFrame to split, where the last column is the target variable.
+    subset_df : pd.DataFrame
+        A DataFrame where each row corresponds to an ROI and each column contains its features.
 
-    test_size : float, optional
-        The proportion of the data to include in the test split (default is 0.2).
+    rois : dict
+        A dictionary where keys are image tags and values are dictionaries of ROIs.
+        Each ROI dictionary contains the coordinates of the ROI.
+
+    layers : dict
+        A dictionary where keys are image tags and values are 2D NumPy arrays representing
+        the image layers from which the ROIs were extracted.
+
+    model_type : str, optional
+        The type of model to train. Options are 'svm' (Support Vector Machine), 'rf' (Random Forest),
+        or 'logreg' (Logistic Regression). Default is 'svm'.
 
     Returns:
     -------
-    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        A tuple containing the training features, training labels, testing features, and testing labels:
-        - X_train: Features for the training set.
-        - y_train: Labels for the training set.
-        - X_test: Features for the testing set.
-        - y_test: Labels for the testing set.
+    sklearn Pipeline or RandomForestClassifier
+        The best estimator found by active learning.
     """
 
-    df_train, df_test = train_test_split(df, test_size=test_size, random_state=42)
+    # Split the dataset into train and test sets
+    test_size = min(int(0.2 * len(subset_df)), 100)
+    train_X, test_X = train_test_split(
+        subset_df, test_size=test_size, stratify=subset_df["cluster"], random_state=42
+    )
 
-    # Extracting features and labels
-    X_train = df_train.iloc[:, :-1].values
-    y_train = df_train.iloc[:, -1].values
-    X_test = df_test.iloc[:, :-1].values
-    y_test = df_test.iloc[:, -1].values
+    # Label 10% of the data (max 100 instances) of train_val_X set
+    initial_sample_size = min(int(0.1 * len(train_X)), 100)
+    train_X_labeled, train_X_unlabeled = train_test_split(
+        train_X,
+        train_size=initial_sample_size,
+        stratify=train_X["cluster"],
+        random_state=42,
+    )
 
-    return X_train, y_train, X_test, y_test
+    print("Label the train set:")
+    train_y_labeled = manual_labeling(train_X_labeled, rois, layers)
+
+    # Label the test_X set
+    print("Label the test set:")
+    test_y = manual_labeling(test_X, rois, layers)
+
+    # Create datasets
+    X_labeled = train_X_labeled.drop(columns=["cluster"])
+    y_labeled = train_y_labeled["label_column"].astype(int)
+    X_unlabeled = train_X_unlabeled.drop(columns=["cluster"])
+
+    # Prepare test dataset
+    X_test = test_X.drop(columns=["cluster"])
+    y_test = test_y["label_column"].astype(int)
+
+    # Initialize the active learning
+
+    performance_scores = []
+    while True:
+
+        # 1) Train
+        if model_type == "svm":
+            model = train_svm(X_labeled.values, y_labeled.values)
+        elif model_type == "rf":
+            model = train_rf(X_labeled.values, y_labeled.values)
+        elif model_type == "logreg":
+            model = train_logreg(X_labeled.values, y_labeled.values)
+        else:
+            raise ValueError(
+                f"Unsupported model type: {model_type}. Choose from 'svm', 'rf', or 'logreg'."
+            )
+
+        # 2) Evaluate
+        f1 = f1_score(y_test, model.predict(X_test.values))
+        roc_auc = roc_auc_score(y_test, model.predict_proba(X_test.values)[:, 1])
+
+        performance_scores.append({"f1": f1, "roc_auc": roc_auc})
+        print(
+            f"Iteration {len(performance_scores)}: F1-Score = {f1:.4f}, ROC-AUC = {roc_auc:.4f}"
+        )
+
+        # Check if the improvement in performance is minimal or both metrics have reached the maximum value of 1
+        if len(performance_scores) > 1:
+            if (
+                (performance_scores[-1]["f1"] - performance_scores[-2]["f1"] < 0.01)
+                and (
+                    performance_scores[-1]["roc_auc"]
+                    - performance_scores[-2]["roc_auc"]
+                    < 0.01
+                )
+            ) or (
+                performance_scores[-1]["f1"] == 1
+                and performance_scores[-1]["roc_auc"] == 1
+            ):
+                print(
+                    "Performance improvement is minimal or metrics reached maximum, stopping the iteration."
+                )
+                break
+
+        # 3) Predict and Extract
+        # Calculate uncertainty
+        # Closer to 1 indicates that the model is highly uncertain about that instance
+        # Uncertainty is calculated based on how close the probabilities are to a 50/50 split
+        uncertainties = 1 - np.max(model.predict_proba(X_unlabeled.values), axis=1)
+
+        # Sort by uncertainty (highest uncertainty first)
+        uncertain_indices = np.argsort(uncertainties)[-initial_sample_size:]
+
+        # Recollect Uncertain Instances for Manual Labeling
+        X_uncertain = X_unlabeled.iloc[uncertain_indices]
+
+        # 4) Label
+        y_uncertain = manual_labeling(X_uncertain, rois, layers)
+        y_uncertain = y_uncertain["label_column"].astype(int)
+
+        # Add newly labeled data to the labeled dataset
+        X_labeled = pd.concat([X_labeled, X_uncertain])
+        y_labeled = pd.concat([y_labeled, y_uncertain])
+
+        # Remove the newly labeled data from the unlabeled dataset
+        X_unlabeled = X_unlabeled.drop(X_uncertain.index)
+
+    # Plotting the evolution of ROC-AUC and F1-Score over iterations
+    iterations = list(range(1, len(performance_scores) + 1))
+    f1_scores = [score["f1"] for score in performance_scores]
+    roc_auc_scores = [score["roc_auc"] for score in performance_scores]
+
+    plt.figure(figsize=(14, 7))
+
+    # Plot F1-Score
+    plt.subplot(1, 2, 1)
+    plt.plot(iterations, f1_scores, marker="o", color="blue")
+    plt.title("F1-Score Evolution Over Iterations")
+    plt.xlabel("Iteration")
+    plt.ylabel("F1-Score")
+    plt.ylim(0, 1)
+    plt.xticks(ticks=range(min(iterations), max(iterations) + 1))
+    plt.grid(True)
+
+    # Plot ROC-AUC
+    plt.subplot(1, 2, 2)
+    plt.plot(iterations, roc_auc_scores, marker="o", color="green")
+    plt.title("ROC-AUC Evolution Over Iterations")
+    plt.xlabel("Iteration")
+    plt.ylabel("ROC-AUC")
+    plt.ylim(0, 1)
+    plt.xticks(ticks=range(min(iterations), max(iterations) + 1))
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+    return model
+
+
+def manual_labeling(
+    features_df: pd.DataFrame, rois: Dict[str, dict], layers: Dict[str, np.ndarray]
+) -> pd.DataFrame:
+    """
+    This function asks the user to label the images corresponding to the features_df.
+
+    Parameters:
+    ----------
+    features_df: pd.DataFrame
+        The training features where each row is a sample and each column is a feature.
+
+    rois : dict
+        A dictionary where keys are image tags and values are dictionaries of ROIs.
+        Each ROI dictionary contains the coordinates of the ROI.
+
+    layers : dict
+        A dictionary where keys are image tags and values are 2D NumPy arrays representing
+        the image layers from which the ROIs were extracted.
+
+    Returns:
+    -------
+    pd.DataFrame
+        A dataframe with the manual labels under the column "label_column"
+    """
+    index_list = features_df.index.tolist()
+
+    labels_dict = {}
+    n = 1
+    for index in index_list:
+        print(f"Image {n} out of {len(index_list)}.")
+        tag = index.split("_roi")[0]
+        roi = f"roi{index.split('_roi')[1]}"
+        layer = layers[tag]
+        roi_values = rois[tag][roi]
+        labels_dict[index] = user_input(roi_values, layer)
+        n += 1
+
+    labels_df = pd.DataFrame.from_dict(
+        labels_dict, orient="index", columns=["label_column"]
+    )
+
+    return labels_df
 
 
 def train_svm(
@@ -231,7 +401,7 @@ def train_svm(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(random_state=42)),
-            ("svm", SVC(kernel="rbf", random_state=42)),
+            ("svm", SVC(kernel="rbf", probability=True, random_state=42)),
         ]
     )
 
@@ -253,7 +423,7 @@ def train_svm(
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return random_search, best_model
+    return best_model
 
 
 def train_rf(
@@ -308,7 +478,7 @@ def train_rf(
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return random_search, best_model
+    return best_model
 
 
 def train_logreg(
@@ -358,89 +528,4 @@ def train_logreg(
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return random_search, best_model
-
-
-def evaluate(
-    image_folder: Path,
-    best_model: Pipeline,
-    X: np.ndarray,
-    y: np.ndarray,
-    plot: Optional[bool] = False,
-) -> None:
-    """
-    This function evaluates the performance of a machine learning model using cross-validation and save the metrics.
-
-    Parameters:
-    ----------
-    image_folder : Path
-        The folder where the evaluation results will be saved. The results will be saved as a CSV file named 'evaluation.csv'.
-
-    best_model : Pipeline
-        The trained model pipeline to evaluate. This model should be an estimator object that supports `cross_val_predict`.
-
-    X : np.ndarray
-        The feature matrix used for evaluation. It should be a 2D array where each row represents a sample and each column represents a feature.
-
-    y : np.ndarray
-        The true labels corresponding to `X`. It should be a 1D array with labels for each sample.
-
-    plot : Optional[bool], default=False
-        If True, a Precision-Recall curve will be plotted.
-
-    Returns:
-    -------
-    None
-        This function does not return any value. It saves the evaluation metrics to a CSV file and optionally plots a Precision-Recall curve.
-    """
-
-    # Predict labels using cross-validation
-    y_pred = cross_val_predict(best_model, X, y, cv=3)
-
-    # Try to get decision scores or probability scores
-    try:
-        y_scores = cross_val_predict(best_model, X, y, cv=3, method="decision_function")
-    except (AttributeError, NotImplementedError):
-        y_scores = cross_val_predict(best_model, X, y, cv=3, method="predict_proba")
-        y_scores = y_scores[:, 1]  # Use the probability for the positive class
-
-    # Calculate metrics
-    precision = precision_score(y, y_pred)
-    recall = recall_score(y, y_pred)
-    f1 = f1_score(y, y_pred)
-    roc = roc_auc_score(y, y_scores)
-
-    # Print metrics
-    print(f"Precision: {precision}")
-    print(f"Recall: {recall}")
-    print(f"f1: {f1}")
-    print(f"ROC-AUC: {roc}")
-
-    # Save metrics to CSV
-    metrics_df = pd.DataFrame(
-        {
-            "metric": ["precision", "recall", "f1", "roc_auc"],
-            "score": [precision, recall, f1, roc],
-        }
-    )
-
-    def get_var_name(var):
-        for name, value in globals().items():
-            if value is var:
-                return name
-
-    evaluate_path = image_folder.parent / f"evaluation_{get_var_name(X)}.csv"
-    metrics_df.to_csv(evaluate_path, index=False)
-
-    # Print confusion matrix
-    print(f"Confusion matrix: \n{confusion_matrix(y, y_pred)}")
-
-    # Optionally plot Precision-Recall curve
-    if plot:
-        precisions, recalls, _ = precision_recall_curve(y, y_scores)
-        plt.plot(recalls, precisions, linewidth=2, label="Precision-Recall curve")
-        plt.xlabel("Recall (TP / (TP + FN))")
-        plt.ylabel("Precision (TP / (TP + FP))")
-        plt.title("Precision-Recall Curve")
-        plt.grid(True)
-        plt.show()
+    return best_model
