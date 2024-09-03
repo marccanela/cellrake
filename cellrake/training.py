@@ -201,7 +201,7 @@ def active_learning(
     """
 
     # Split the dataset into train and test sets
-    test_size = min(int(0.2 * len(subset_df)), 100)
+    test_size = min(int(0.2 * len(subset_df)), 200)
     train_X, test_X = train_test_split(
         subset_df, test_size=test_size, stratify=subset_df["cluster"], random_state=42
     )

@@ -59,7 +59,7 @@ def convert_to_roi(
 
 
 def iterate_segmentation(
-    image_folder: Path,
+    image_folder: Path, threshold_rel: float
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
     """
     This function iterates over all `.tif` files in the given `image_folder`, applies a pre-trained StarDist model
@@ -70,6 +70,9 @@ def iterate_segmentation(
     ----------
     image_folder : pathlib.Path
         A Path object pointing to the folder containing the `.tif` images to be segmented.
+    threshold_rel : float
+        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
+        This should have a value between 0 and 1.
 
     Returns:
     -------
@@ -87,7 +90,7 @@ def iterate_segmentation(
     ):
 
         # Segment the image
-        polygons, layer = segment_image(tif_path)
+        polygons, layer = segment_image(tif_path, threshold_rel)
 
         # Store the results in the dictionaries
         tag = tif_path.stem
@@ -191,7 +194,7 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     return labels_list
 
 
-def create_combined_binary_image(layer: np.ndarray) -> np.ndarray:
+def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.ndarray:
     """
     This function creates a combined binary image from detected blobs using Laplacian of Gaussian.
 
@@ -199,6 +202,9 @@ def create_combined_binary_image(layer: np.ndarray) -> np.ndarray:
     ----------
     layer : np.ndarray
         The input image layer as a 2D NumPy array.
+    threshold_rel : float
+        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
+        This should have a value between 0 and 1.
 
     Returns:
     -------
@@ -207,7 +213,12 @@ def create_combined_binary_image(layer: np.ndarray) -> np.ndarray:
     """
     # Detect blobs using Laplacian of Gaussian (LoG)
     blobs_log = feature.blob_log(
-        layer, max_sigma=15, num_sigma=10, threshold=None, threshold_rel=0.05
+        layer,
+        max_sigma=15,
+        num_sigma=10,
+        overlap=0,
+        threshold=None,
+        threshold_rel=threshold_rel,
     )
 
     # Process each blob to create a labelled mask
@@ -225,13 +236,25 @@ def create_combined_binary_image(layer: np.ndarray) -> np.ndarray:
     combined_array = np.zeros_like(binaries[0], dtype=np.uint16)
     next_label = 1
 
+    # Collect all labels and their sizes from all segment arrays
+    label_sizes = {}
+
     for seg_array in binaries:
-
-        # Get unique non-zero labels in the segment array
         unique_labels = np.unique(seg_array[seg_array != 0])
-
         for label in unique_labels:
-            combined_array[seg_array == label] = next_label
+            if label not in label_sizes:
+                mask = seg_array == label
+                size = np.sum(mask)
+                label_sizes[label] = size
+
+    # Sort labels by their size (smallest first)
+    sorted_labels = sorted(label_sizes.keys(), key=lambda l: label_sizes[l])
+
+    # Apply the labels to the combined_array in sorted order
+    for label in sorted_labels:
+        for seg_array in binaries:
+            mask = seg_array == label
+            combined_array[mask] = next_label
             next_label += 1
 
     return combined_array
@@ -400,7 +423,9 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
     return polygons
 
 
-def segment_image(tif_path: Path) -> Tuple[Dict[int, List], np.ndarray]:
+def segment_image(
+    tif_path: Path, threshold_rel: float
+) -> Tuple[Dict[int, List], np.ndarray]:
     """
     This function segments an image to identify and extract ROI polygons.
 
@@ -408,6 +433,9 @@ def segment_image(tif_path: Path) -> Tuple[Dict[int, List], np.ndarray]:
     ----------
     tif_path : Path
         Path to the TIFF image file.
+    threshold_rel : float
+        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
+        This should have a value between 0 and 1.
 
     Returns:
     -------
@@ -424,7 +452,7 @@ def segment_image(tif_path: Path) -> Tuple[Dict[int, List], np.ndarray]:
     layer = layer.astype(np.uint8)
 
     # Create a binary image of the layer with the segmented cells
-    combined_array = create_combined_binary_image(layer)
+    combined_array = create_combined_binary_image(layer, threshold_rel)
 
     # Extract the coordinates of the segmented cells
     polygons = extract_polygons(combined_array)
@@ -432,9 +460,10 @@ def segment_image(tif_path: Path) -> Tuple[Dict[int, List], np.ndarray]:
     return polygons, layer
 
 
-# image_folder = Path(
-#     "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/model_train_data/tdt/"
+# tif_path = Path(
+#     "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt/C2-34459_B15_10X_BLA_003.tif"
 # )
+
 # from skimage import color
 
 # # Plot the results
