@@ -461,7 +461,7 @@ def segment_image(
 
 
 # tif_path = Path(
-#     "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt/C2-34459_B15_10X_BLA_003.tif"
+#     "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt_sample"
 # )
 
 # from skimage import color

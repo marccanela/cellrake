@@ -68,7 +68,6 @@ def analyze_image(
     """
     # Load the ROI information and image layer
     roi_dict = rois[tag]
-    roi_dict = {f"{tag}_{key}": value for key, value in roi_dict.items()}
     layer = layers[tag]
 
     # Process ROIs: extract features
@@ -92,6 +91,13 @@ def analyze_image(
         for roi_name, result in results.items()
         if result == 1
     }
+
+    # Create a new dictionary with sequential keys
+    sorted_keys = sorted(keeped.keys(), key=lambda x: int(x.split("_")[1]))
+    keeped = {f"roi_{i+1}": keeped[key] for i, key in enumerate(sorted_keys)}
+
+    # Filter the input_df
+    input_df = input_df[input_df.index.isin(keeped.keys())]
 
     # Export the processed ROIs
     processed_folder = project_folder / "rois_processed"
@@ -122,7 +128,7 @@ def analyze_image(
     plt.savefig(png_path)
     plt.close()
 
-    return keeped
+    return keeped, input_df
 
 
 def iterate_predicting(
@@ -167,13 +173,26 @@ def iterate_predicting(
     - Results are saved as "counts.csv" and "counts.xlsx" in the `project_folder`.
     """
     results = []
+    dataframes = []
 
     for tag in tqdm(
         rois.keys(), desc="Identifying positive segmentations", unit="image"
     ):
         try:
             # Analyze ROIs and get the filtered list
-            keeped = analyze_image(tag, layers, rois, cmap, project_folder, best_model)
+            keeped, input_df = analyze_image(
+                tag, layers, rois, cmap, project_folder, best_model
+            )
+
+            # Save features
+            input_df = input_df.reset_index()
+            input_df.rename(columns={"index": "rois"}, inplace=True)
+            input_df["image"] = tag
+            columns_order = ["image", "rois"] + [
+                col for col in input_df.columns if col not in ["image", "rois"]
+            ]
+            input_df = input_df[columns_order]
+            dataframes.append(input_df)
 
             # Count the number of positive ROIs (cells)
             final_count = len(keeped)
@@ -186,6 +205,10 @@ def iterate_predicting(
     df = pd.DataFrame(results, columns=["file_name", "num_cells"])
     df.to_csv(project_folder / "counts.csv", index=False)
     df.to_excel(project_folder / "counts.xlsx", index=False)
+
+    features_df = pd.concat(dataframes)
+    features_df.to_csv(project_folder / "features.csv", index=False)
+    features_df.to_excel(project_folder / "features.xlsx", index=False)
 
 
 def colocalize(

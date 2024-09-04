@@ -4,21 +4,35 @@
 
 import pickle as pkl
 from pathlib import Path
+from typing import List, Union
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from PIL import Image
 from sklearn.base import BaseEstimator
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from tqdm import tqdm
 
 from cellrake.predicting import iterate_predicting
 from cellrake.segmentation import export_rois, iterate_segmentation
 from cellrake.training import active_learning, create_subset_df
 from cellrake.utils import build_project
 
-# with open(Path("//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/model_train_data/") / 'model_svm.pkl', 'rb') as file:
+# with open(
+#     Path(
+#         "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/model_train_data/"
+#     )
+#     / "tdt_model_rf.pkl",
+#     "rb",
+# ) as file:
 #     model = pkl.load(file)
 
 
-def train(image_folder: Path, threshold_rel: float, model_type: str = "svm"):
+def train(
+    image_folder: Path, threshold_rel: float, model_type: str = "svm"
+) -> Union[Pipeline, RandomForestClassifier]:
     """
     This function trains a machine learning model using segmented images from the specified folder
     and an active learning approach.
@@ -45,8 +59,6 @@ def train(image_folder: Path, threshold_rel: float, model_type: str = "svm"):
 
     # Extract features and labels from ROIs
     subset_df = create_subset_df(rois, layers)
-    # features_path = image_folder.parent / "features.csv"
-    # subset_df.to_csv(features_path, index=False)
 
     # Perform active learning
     model = active_learning(subset_df, rois, layers, model_type)
@@ -105,3 +117,6 @@ def analyze(
 
     # Apply the prediction model to the layers and ROIs
     iterate_predicting(layers, rois, cmap, project_folder, model)
+
+
+# project_folder = Path('//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt_sample_analysis_trainotherdata')

@@ -201,13 +201,13 @@ def active_learning(
     """
 
     # Split the dataset into train and test sets
-    test_size = min(int(0.2 * len(subset_df)), 200)
+    test_size = min(int(0.2 * len(subset_df)), 100)
     train_X, test_X = train_test_split(
         subset_df, test_size=test_size, stratify=subset_df["cluster"], random_state=42
     )
 
     # Label 10% of the data (max 100 instances) of train_val_X set
-    initial_sample_size = min(int(0.1 * len(train_X)), 100)
+    initial_sample_size = min(int(0.1 * len(train_X)), 50)
     train_X_labeled, train_X_unlabeled = train_test_split(
         train_X,
         train_size=initial_sample_size,
@@ -282,7 +282,7 @@ def active_learning(
         uncertainties = 1 - np.max(model.predict_proba(X_unlabeled.values), axis=1)
 
         # Sort by uncertainty (highest uncertainty first)
-        uncertain_indices = np.argsort(uncertainties)[-initial_sample_size:]
+        uncertain_indices = np.argsort(uncertainties)[-initial_sample_size // 2 :]
 
         # Recollect Uncertain Instances for Manual Labeling
         X_uncertain = X_unlabeled.iloc[uncertain_indices]
