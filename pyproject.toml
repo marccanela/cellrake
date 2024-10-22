@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-keywords = ["image", "fluorescence", "cFos", "tdTomato", "immunohistochemistry", "count cells", "colocalization"]
+keywords = ["image", "fluorescence", "cFos", "tdTomato", "GFP", "immunohistochemistry", "count cells", "colocalization"]
 dependencies = [
     "matplotlib",
     "pandas",
