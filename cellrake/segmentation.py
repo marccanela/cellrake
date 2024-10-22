@@ -7,7 +7,6 @@ import pickle as pkl
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
@@ -458,28 +457,3 @@ def segment_image(
     polygons = extract_polygons(combined_array)
 
     return polygons, layer
-
-
-# tif_path = Path(
-#     "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt_sample"
-# )
-
-# from skimage import color
-
-# # Plot the results
-# plt.figure(figsize=(30, 30))
-
-# # Original image
-# plt.subplot(1, 2, 1)
-# plt.imshow(layer, cmap="gray")
-# plt.title("Original Image")
-# plt.axis("off")
-
-# # Watershed Labels
-# plt.subplot(1, 2, 2)
-# # Overlay the labels on the original image
-# plt.imshow(color.label2rgb(combined_array, image=layer, bg_label=0))
-# plt.title("Watershed Segmentation")
-# plt.axis("off")
-
-# plt.show()

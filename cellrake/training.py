@@ -2,7 +2,6 @@
 @author: Marc Canela
 """
 
-from pathlib import Path
 from typing import Dict, Tuple, Union
 
 import matplotlib.pyplot as plt

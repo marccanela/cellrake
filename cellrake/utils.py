@@ -6,12 +6,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import pandas as pd
 from shapely.geometry import Polygon
 from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
-from tqdm import tqdm
 
 
 def build_project(image_folder: Path) -> Path:

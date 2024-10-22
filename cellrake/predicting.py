@@ -11,19 +11,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
-from scipy.ndimage import zoom
 from shapely.geometry import Polygon
-from skimage.measure import label, regionprops
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
 
-from cellrake.utils import (
-    create_stats_dict,
-    crop,
-    crop_cell_large,
-    fix_polygon,
-    get_cell_mask,
-)
+from cellrake.utils import create_stats_dict, crop, fix_polygon
 
 
 def analyze_image(
@@ -218,20 +210,6 @@ def iterate_predicting(
     features_df = pd.concat(dataframes)
     features_df.to_csv(project_folder / "features.csv", index=False)
     features_df.to_excel(project_folder / "features.xlsx", index=False)
-
-
-processed_rois_path_1 = Path(
-    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/cfos_analysis/detected.pkl"
-)
-images_path_1 = Path(
-    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/cfos"
-)
-processed_rois_path_2 = Path(
-    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/tdt_analysis/detected.pkl"
-)
-images_path_2 = Path(
-    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/tdt"
-)
 
 
 def colocalize(
