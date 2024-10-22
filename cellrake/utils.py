@@ -37,11 +37,11 @@ def build_project(image_folder: Path) -> Path:
     project_folder.mkdir(parents=True, exist_ok=True)
 
     # Create subdirectories for raw ROIs, processed ROIs, and labelled images
-    rois_raw_folder = project_folder / "rois_raw"
-    rois_raw_folder.mkdir(parents=True, exist_ok=True)
+    # rois_raw_folder = project_folder / "rois_raw"
+    # rois_raw_folder.mkdir(parents=True, exist_ok=True)
 
-    rois_predicted_folder = project_folder / "rois_processed"
-    rois_predicted_folder.mkdir(parents=True, exist_ok=True)
+    # rois_predicted_folder = project_folder / "rois_processed"
+    # rois_predicted_folder.mkdir(parents=True, exist_ok=True)
 
     labelledimg_folder = project_folder / "labelled_images"
     labelledimg_folder.mkdir(parents=True, exist_ok=True)

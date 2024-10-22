@@ -100,11 +100,11 @@ def analyze_image(
     input_df = input_df[input_df.index.isin(keeped.keys())]
 
     # Export the processed ROIs
-    processed_folder = project_folder / "rois_processed"
-    processed_folder.mkdir(parents=True, exist_ok=True)
-    pkl_path = processed_folder / f"{tag}.pkl"
-    with open(pkl_path, "wb") as file:
-        pkl.dump(keeped, file)
+    # processed_folder = project_folder / "rois_processed"
+    # processed_folder.mkdir(parents=True, exist_ok=True)
+    # pkl_path = processed_folder / f"{tag}.pkl"
+    # with open(pkl_path, "wb") as file:
+    #     pkl.dump(keeped, file)
 
     # Plot results
     _, axes = plt.subplots(1, 2, figsize=(12, 6))
@@ -174,6 +174,7 @@ def iterate_predicting(
     """
     results = []
     dataframes = []
+    detected = {}
 
     for tag in tqdm(
         rois.keys(), desc="Identifying positive segmentations", unit="image"
@@ -183,6 +184,9 @@ def iterate_predicting(
             keeped, input_df = analyze_image(
                 tag, layers, rois, cmap, project_folder, best_model
             )
+
+            # Save keeped
+            detected[tag] = keeped
 
             # Save features
             input_df = input_df.reset_index()
@@ -201,6 +205,11 @@ def iterate_predicting(
         except Exception as e:
             print(f"Error processing {tag}: {e}")
 
+    # Export keeped ROIs
+    detected_path = f"{project_folder}/detected.pkl"
+    with open(detected_path, "wb") as file:
+        pkl.dump(detected, file)
+
     # Convert results to a DataFrame and save to CSV and Excel
     df = pd.DataFrame(results, columns=["file_name", "num_cells"])
     df.to_csv(project_folder / "counts.csv", index=False)
@@ -209,6 +218,20 @@ def iterate_predicting(
     features_df = pd.concat(dataframes)
     features_df.to_csv(project_folder / "features.csv", index=False)
     features_df.to_excel(project_folder / "features.xlsx", index=False)
+
+
+processed_rois_path_1 = Path(
+    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/cfos_analysis/detected.pkl"
+)
+images_path_1 = Path(
+    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/cfos"
+)
+processed_rois_path_2 = Path(
+    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/tdt_analysis/detected.pkl"
+)
+images_path_2 = Path(
+    "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/1_SOC/3_TRAP2/microscopi/microscope_females/dgca1/tdt"
+)
 
 
 def colocalize(
@@ -225,13 +248,13 @@ def colocalize(
     Parameters:
     ----------
     processed_rois_path_1 : Path
-        Path to the folder containing processed ROIs from the first set of images.
+        Path to the PKL processed ROIs from the first set of images.
 
     images_path_1 : Path
         Path to the folder containing TIFF images corresponding to the first set of ROIs.
 
     processed_rois_path_2 : Path
-        Path to the folder containing processed ROIs from the second set of images.
+        Path to the PKL processed ROIs from the second set of images.
 
     images_path_2 : Path
         Path to the folder containing TIFF images corresponding to the second set of ROIs.
@@ -261,20 +284,21 @@ def colocalize(
     colocalization_images_path = colocalization_folder_path / "labelled_images"
     colocalization_images_path.mkdir(parents=True, exist_ok=True)
 
-    for processed_roi_path_1 in tqdm(
-        list(processed_rois_path_1.glob("*.pkl")),
-        desc="Processing images",
-        unit="image",
+    # Open detections
+    with open(processed_rois_path_1, "rb") as file:
+        rois_1 = pkl.load(file)
+    with open(processed_rois_path_2, "rb") as file:
+        rois_2 = pkl.load(file)
+
+    # Start iterations
+    for image_tag_1, processed_rois_1 in tqdm(
+        rois_1.items(), desc="Processing images", unit="image"
     ):
-        tag = processed_roi_path_1.stem[3:]
+        tag = image_tag_1[3:]
         overlapped = {}
 
-        # Load ROIs from the first set of images
-        with open(processed_roi_path_1, "rb") as file:
-            processed_roi_1 = pkl.load(file)
-
         rois_indexed_1 = {}
-        for roi_name_1, roi_info_1 in processed_roi_1.items():
+        for roi_name_1, roi_info_1 in processed_rois_1.items():
             x_coords_1, y_coords_1 = roi_info_1["x"], roi_info_1["y"]
             polygon_1 = Polygon(zip(x_coords_1, y_coords_1))
             polygon_1 = fix_polygon(polygon_1)
@@ -282,12 +306,14 @@ def colocalize(
                 rois_indexed_1[roi_name_1] = polygon_1
 
         # Compare with ROIs from the second set of images
-        processed_roi_path_2 = list(processed_rois_path_2.glob(f"*{tag}.pkl"))[0]
+        matching_key = next((key for key in rois_2 if key.endswith(tag)), None)
+        if matching_key:
+            processed_roi_2 = rois_2[matching_key]
+        else:
+            print(f"Skipping image '{tag}'")
+            continue
 
-        with open(processed_roi_path_2, "rb") as file:
-            processed_roi_2 = pkl.load(file)
-
-        for roi_name_2, roi_info_2 in processed_roi_2.items():
+        for _, roi_info_2 in processed_roi_2.items():
             x_coords_2, y_coords_2 = roi_info_2["x"], roi_info_2["y"]
             polygon_2 = Polygon(zip(x_coords_2, y_coords_2))
             polygon_2 = fix_polygon(polygon_2)
@@ -301,17 +327,59 @@ def colocalize(
                         area_roi_2 = polygon_2.area
                         smaller_roi = min(area_roi_1, area_roi_2)
                         if intersection_area >= 0.8 * smaller_roi:
-                            overlapped[roi_name_1] = processed_roi_1[roi_name_1]
+                            overlapped[roi_name_1] = processed_rois_1[roi_name_1]
                             break
 
+        # for processed_roi_path_1 in tqdm(
+        #     list(processed_rois_path_1.glob("*.pkl")),
+        #     desc="Processing images",
+        #     unit="image",
+        # ):
+        #     tag = processed_roi_path_1.stem[3:]
+        #     overlapped = {}
+
+        # # Load ROIs from the first set of images
+        # with open(processed_roi_path_1, "rb") as file:
+        #     processed_roi_1 = pkl.load(file)
+
+        # rois_indexed_1 = {}
+        # for roi_name_1, roi_info_1 in processed_roi_1.items():
+        #     x_coords_1, y_coords_1 = roi_info_1["x"], roi_info_1["y"]
+        #     polygon_1 = Polygon(zip(x_coords_1, y_coords_1))
+        #     polygon_1 = fix_polygon(polygon_1)
+        #     if polygon_1 is not None:
+        #         rois_indexed_1[roi_name_1] = polygon_1
+
+        # Compare with ROIs from the second set of images
+        # processed_roi_path_2 = list(processed_rois_path_2.glob(f"*{tag}.pkl"))[0]
+
+        # with open(processed_roi_path_2, "rb") as file:
+        #     processed_roi_2 = pkl.load(file)
+
+        # for roi_name_2, roi_info_2 in processed_roi_2.items():
+        #     x_coords_2, y_coords_2 = roi_info_2["x"], roi_info_2["y"]
+        #     polygon_2 = Polygon(zip(x_coords_2, y_coords_2))
+        #     polygon_2 = fix_polygon(polygon_2)
+        #     if polygon_2 is not None:
+        #         for roi_name_1, polygon_1 in rois_indexed_1.items():
+        #             intersection = polygon_1.intersection(polygon_2)
+        #             intersection_area = intersection.area
+
+        #             if intersection_area > 0:
+        #                 area_roi_1 = polygon_1.area
+        #                 area_roi_2 = polygon_2.area
+        #                 smaller_roi = min(area_roi_1, area_roi_2)
+        #                 if intersection_area >= 0.8 * smaller_roi:
+        #                     overlapped[roi_name_1] = processed_roi_1[roi_name_1]
+        #                     break
+
         # Plot results
-        fig, axes = plt.subplots(1, 4, figsize=(15, 5))
+        _, axes = plt.subplots(1, 4, figsize=(15, 5))
 
         image_path_1 = list(images_path_1.glob(f"*{tag}.tif"))[0]
-
         image_1 = np.asarray(Image.open(image_path_1))
-        layer_1 = zoom(image_1, zoom=0.5, order=1)
-        layer_1 = crop(layer_1)
+        layer_1 = crop(image_1)
+        layer_1 = layer_1.astype(np.uint8)
         axes[0].imshow(layer_1, cmap="Greens", vmin=0, vmax=255)
         axes[0].set_title(f"Original {images_path_1.stem} image")
         axes[0].axis("off")
@@ -324,8 +392,8 @@ def colocalize(
 
         image_path_2 = list(images_path_2.glob(f"*{tag}.tif"))[0]
         image_2 = np.asarray(Image.open(image_path_2))
-        layer_2 = zoom(image_2, zoom=0.5, order=1)
-        layer_2 = crop(layer_2)
+        layer_2 = crop(image_2)
+        layer_2 = layer_2.astype(np.uint8)
         axes[2].imshow(layer_2, cmap="Reds", vmin=0, vmax=255)
         axes[2].set_title(f"Original {images_path_2.stem} image")
         axes[2].axis("off")

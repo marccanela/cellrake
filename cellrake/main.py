@@ -4,11 +4,10 @@
 
 import pickle as pkl
 from pathlib import Path
-from typing import List, Union
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from PIL import Image
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier
@@ -16,18 +15,9 @@ from sklearn.pipeline import Pipeline
 from tqdm import tqdm
 
 from cellrake.predicting import iterate_predicting
-from cellrake.segmentation import export_rois, iterate_segmentation
+from cellrake.segmentation import iterate_segmentation
 from cellrake.training import active_learning, create_subset_df
-from cellrake.utils import build_project
-
-# with open(
-#     Path(
-#         "//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/model_train_data/"
-#     )
-#     / "tdt_model_rf.pkl",
-#     "rb",
-# ) as file:
-#     model = pkl.load(file)
+from cellrake.utils import build_project, crop
 
 
 def train(
@@ -63,10 +53,18 @@ def train(
     # Perform active learning
     model = active_learning(subset_df, rois, layers, model_type)
 
+    # Create the base project folder with "_training" suffix
+    project_folder = image_folder.parent / f"{image_folder.stem}_training"
+
     # Save the trained model
-    model_path = image_folder.parent / f"model_{model_type}.pkl"
-    with open(model_path, "wb") as file:
+    with open(
+        project_folder / f"{image_folder.stem}_model_{model_type}.pkl", "wb"
+    ) as file:
         pkl.dump(model, file)
+
+    # Save the rois
+    with open(project_folder / f"{image_folder.stem}_rois.pkl", "wb") as file:
+        pkl.dump(rois, file)
 
     return model
 
@@ -109,14 +107,33 @@ def analyze(
     # Create a project folder for organizing results
     project_folder = build_project(image_folder)
 
-    # Segment images to obtain two dictionaries: 'rois' and 'layers'
-    rois, layers = iterate_segmentation(image_folder, threshold_rel)
+    # Check if there is an existing segmentation
+    rois_path = project_folder / f"{image_folder.stem}_segmentation.pkl"
+    if rois_path.exists():
+        print(f"Existing segmentation detected.")
 
-    # Export segmented ROIs to the project folder
-    export_rois(project_folder, rois)
+        # Open segmentation
+        with open(rois_path, "rb") as file:
+            rois = pkl.load(file)
+
+        # Crear layers dictionary
+        layers = {}
+        for tif_path in tqdm(
+            list(image_folder.glob("*.tif")), desc="Openining images", unit="image"
+        ):
+            layer = np.asarray(Image.open(tif_path))
+            layer = crop(layer)
+            layer = layer.astype(np.uint8)
+            tag = tif_path.stem
+            layers[tag] = layer
+
+    else:
+        # Segment images to obtain two dictionaries: 'rois' and 'layers'
+        rois, layers = iterate_segmentation(image_folder, threshold_rel)
+
+        # Save the rois
+        with open(rois_path, "wb") as file:
+            pkl.dump(rois, file)
 
     # Apply the prediction model to the layers and ROIs
     iterate_predicting(layers, rois, cmap, project_folder, model)
-
-
-# project_folder = Path('//folder/becell/Lab Projects/ERCstG_HighMemory/Data/Marc/2_CellRake/jose_bla_data/tdt_sample_analysis_trainotherdata')
