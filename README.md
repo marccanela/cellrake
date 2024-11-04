@@ -4,7 +4,7 @@
 
 ## Why this package?
 
-**CellRake** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [StarDist](https://github.com/stardist/stardist), model training based and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
+**CellRake** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [Scikit-image]([https://github.com/stardist/stardist](https://scikit-image.org/)), model training and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
 
 ## Installation
 
@@ -32,7 +32,7 @@ This command creates a new environment named `cellrake` with Python 3.9 installe
 
 ### Step 3: Activate the Conda Environment
 
-Before installing the CellRake package, you need to activate the Conda environment you just created. This tells your system to use the Python and packages installed in that environment.
+Before installing the CellRake package, you must activate the Conda environment you just created. This tells your system to use the Python and packages installed in that environment.
 
 To activate the environment, run:
 
@@ -54,7 +54,7 @@ pip install cellrake
 
 This command tells pip to install CellRake from the PyPI repository. Now you are ready to go!
 
-**Note:** If you installed the package some time ago, I recommend to update to the newest version to avoid bugs. You can do this by running:
+**Note:** If you installed the package some time ago, I recommend updating to the newest version to avoid bugs. You can do this by running:
 
 ```bash
 pip install cellrake --upgrade
