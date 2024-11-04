@@ -4,7 +4,7 @@
 
 ## Why this package?
 
-**CellRake** is a Python package designed to analyze cells in fluorescent images. It provides tools for image segmentation based on [Scikit-image]([https://github.com/stardist/stardist](https://scikit-image.org/)), model training and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
+**CellRake** is a Python package that analyzes cells in fluorescent images. It provides tools for image segmentation based on [Scikit-image](https://scikit-image.org/stable/), model training and prediction based on [Scikit-learn](https://scikit-learn.org/stable/), and colocalization analysis, tailored for complex experiments involving multiple fluorescent markers.
 
 ## Installation
 
