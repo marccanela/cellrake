@@ -354,6 +354,9 @@ def manual_labeling(
     pd.DataFrame
         A dataframe with the manual labels under the column "label_column"
     """
+    if features_df.empty:
+        raise ValueError("The features DataFrame is empty. Please provide a valid one.")
+
     index_list = features_df.index.tolist()
 
     labels_dict = {}
@@ -374,9 +377,7 @@ def manual_labeling(
     return labels_df
 
 
-def train_svm(
-    X_train: np.ndarray, y_train: np.ndarray
-) -> Tuple[RandomizedSearchCV, Pipeline]:
+def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     """
     This function trains an SVM model with hyperparameter tuning using RandomizedSearchCV.
 
@@ -390,9 +391,7 @@ def train_svm(
 
     Returns:
     -------
-    Tuple[RandomizedSearchCV, Pipeline]
-        - random_search: The RandomizedSearchCV object containing the results of the search.
-        - best_model: The best estimator found by the random search, ready for prediction.
+    best_model: The best estimator found by the random search, ready for prediction.
     """
 
     # Create a pipeline with scaling, PCA, and SVM
@@ -425,9 +424,7 @@ def train_svm(
     return best_model
 
 
-def train_rf(
-    X_train: np.ndarray, y_train: np.ndarray
-) -> Tuple[RandomizedSearchCV, RandomForestClassifier]:
+def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier:
     """
     This function trains a Random Forest Classifier with hyperparameter tuning using RandomizedSearchCV.
 
@@ -441,9 +438,7 @@ def train_rf(
 
     Returns:
     -------
-    Tuple[RandomizedSearchCV, RandomForestClassifier]
-        - random_search: The RandomizedSearchCV object containing the results of the search.
-        - best_model: The best estimator found by the random search, which is a RandomForestClassifier.
+    best_model: The best estimator found by the random search, which is a RandomForestClassifier.
     """
 
     # Initialize RandomForestClassifier
@@ -480,9 +475,7 @@ def train_rf(
     return best_model
 
 
-def train_logreg(
-    X_train: np.ndarray, y_train: np.ndarray
-) -> Tuple[RandomizedSearchCV, Pipeline]:
+def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     """
     This function trains a Logistic Regression model with hyperparameter tuning using RandomizedSearchCV.
 
@@ -496,9 +489,7 @@ def train_logreg(
 
     Returns:
     -------
-    Tuple[RandomizedSearchCV, Pipeline]
-        - random_search: The RandomizedSearchCV object containing the results of the search.
-        - best_model: The best estimator found by the random search, which is a Pipeline containing PCA and LogisticRegression.
+    best_model: The best estimator found by the random search, which is a Pipeline containing PCA and LogisticRegression.
     """
 
     # Define the pipeline

@@ -6,10 +6,30 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 from shapely.geometry import Polygon
 from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
+
+
+def export_data(data, project_folder, file_name):
+    """
+    Saves data to CSV and Excel files in the specified project folder.
+
+    Parameters:
+    ----------
+    data : pd.DataFrame
+        Data to save.
+
+    project_folder : Path
+        Folder to save the files.
+
+    file_name : str
+        Base name of the files (without extensions).
+    """
+    data.to_csv(project_folder / f"{file_name}.csv", index=False)
+    data.to_excel(project_folder / f"{file_name}.xlsx", index=False)
 
 
 def build_project(image_folder: Path) -> Path:
@@ -34,13 +54,6 @@ def build_project(image_folder: Path) -> Path:
     project_folder = image_folder.parent / f"{image_folder.stem}_analysis"
     project_folder.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories for raw ROIs, processed ROIs, and labelled images
-    # rois_raw_folder = project_folder / "rois_raw"
-    # rois_raw_folder.mkdir(parents=True, exist_ok=True)
-
-    # rois_predicted_folder = project_folder / "rois_processed"
-    # rois_predicted_folder.mkdir(parents=True, exist_ok=True)
-
     labelledimg_folder = project_folder / "labelled_images"
     labelledimg_folder.mkdir(parents=True, exist_ok=True)
 
@@ -48,7 +61,17 @@ def build_project(image_folder: Path) -> Path:
 
 
 def change_names(folder_path, number: int = 300):
+    """
+    Renames .nd2 files in the specified folder by incrementing a number in the filename.
 
+    Parameters:
+    ----------
+    folder_path : Path
+        The path to the folder containing the files to rename.
+
+    number : int
+        The number to add to the second part of the filename.
+    """
     # Iterate over all files in the folder
     for filename in folder_path.iterdir():
         if filename.is_file() and filename.suffix == ".nd2":

@@ -4,7 +4,7 @@
 
 import pickle as pkl
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -15,7 +15,7 @@ from shapely.geometry import Polygon
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
 
-from cellrake.utils import create_stats_dict, crop, fix_polygon
+from cellrake.utils import create_stats_dict, crop, export_data, fix_polygon
 
 
 def analyze_image(
@@ -24,7 +24,7 @@ def analyze_image(
     rois: Dict[str, Dict[str, np.ndarray]],
     cmap: mcolors.Colormap,
     project_folder: Path,
-    best_model: Optional[BaseEstimator],
+    best_model: BaseEstimator,
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """
     This function analyzes an image by processing ROIs, classifying them using a model,
@@ -49,7 +49,7 @@ def analyze_image(
     project_folder : Path
         The directory where the processed ROIs and visualizations will be saved.
 
-    best_model : Optional[BaseEstimator]
+    best_model : BaseEstimator
         A trained model with a `predict` method for classifying ROIs.
 
     Returns:
@@ -91,13 +91,6 @@ def analyze_image(
     # Filter the input_df
     input_df = input_df[input_df.index.isin(keeped.keys())]
 
-    # Export the processed ROIs
-    # processed_folder = project_folder / "rois_processed"
-    # processed_folder.mkdir(parents=True, exist_ok=True)
-    # pkl_path = processed_folder / f"{tag}.pkl"
-    # with open(pkl_path, "wb") as file:
-    #     pkl.dump(keeped, file)
-
     # Plot results
     _, axes = plt.subplots(1, 2, figsize=(12, 6))
 
@@ -132,8 +125,7 @@ def iterate_predicting(
 ) -> None:
     """
     This function processes each image by identifying positive ROIs using
-    the provided model or a default filtering approach. Calculates and saves statistics
-    on the number of ROIs (cells) per image.
+    the provided model. Calculates and saves statistics on the number of ROIs (cells) per image.
 
     Parameters:
     ----------
@@ -165,7 +157,7 @@ def iterate_predicting(
     - Results are saved as "counts.csv" and "counts.xlsx" in the `project_folder`.
     """
     results = []
-    dataframes = []
+    concatenated_df = pd.DataFrame()
     detected = {}
 
     for tag in tqdm(
@@ -188,7 +180,7 @@ def iterate_predicting(
                 col for col in input_df.columns if col not in ["image", "rois"]
             ]
             input_df = input_df[columns_order]
-            dataframes.append(input_df)
+            concatenated_df = pd.concat([concatenated_df, input_df], ignore_index=True)
 
             # Count the number of positive ROIs (cells)
             final_count = len(keeped)
@@ -204,12 +196,8 @@ def iterate_predicting(
 
     # Convert results to a DataFrame and save to CSV and Excel
     df = pd.DataFrame(results, columns=["file_name", "num_cells"])
-    df.to_csv(project_folder / "counts.csv", index=False)
-    df.to_excel(project_folder / "counts.xlsx", index=False)
-
-    features_df = pd.concat(dataframes)
-    features_df.to_csv(project_folder / "features.csv", index=False)
-    features_df.to_excel(project_folder / "features.xlsx", index=False)
+    export_data(df, project_folder, "counts")
+    export_data(concatenated_df, project_folder, "features")
 
 
 def colocalize(
@@ -308,49 +296,6 @@ def colocalize(
                             overlapped[roi_name_1] = processed_rois_1[roi_name_1]
                             break
 
-        # for processed_roi_path_1 in tqdm(
-        #     list(processed_rois_path_1.glob("*.pkl")),
-        #     desc="Processing images",
-        #     unit="image",
-        # ):
-        #     tag = processed_roi_path_1.stem[3:]
-        #     overlapped = {}
-
-        # # Load ROIs from the first set of images
-        # with open(processed_roi_path_1, "rb") as file:
-        #     processed_roi_1 = pkl.load(file)
-
-        # rois_indexed_1 = {}
-        # for roi_name_1, roi_info_1 in processed_roi_1.items():
-        #     x_coords_1, y_coords_1 = roi_info_1["x"], roi_info_1["y"]
-        #     polygon_1 = Polygon(zip(x_coords_1, y_coords_1))
-        #     polygon_1 = fix_polygon(polygon_1)
-        #     if polygon_1 is not None:
-        #         rois_indexed_1[roi_name_1] = polygon_1
-
-        # Compare with ROIs from the second set of images
-        # processed_roi_path_2 = list(processed_rois_path_2.glob(f"*{tag}.pkl"))[0]
-
-        # with open(processed_roi_path_2, "rb") as file:
-        #     processed_roi_2 = pkl.load(file)
-
-        # for roi_name_2, roi_info_2 in processed_roi_2.items():
-        #     x_coords_2, y_coords_2 = roi_info_2["x"], roi_info_2["y"]
-        #     polygon_2 = Polygon(zip(x_coords_2, y_coords_2))
-        #     polygon_2 = fix_polygon(polygon_2)
-        #     if polygon_2 is not None:
-        #         for roi_name_1, polygon_1 in rois_indexed_1.items():
-        #             intersection = polygon_1.intersection(polygon_2)
-        #             intersection_area = intersection.area
-
-        #             if intersection_area > 0:
-        #                 area_roi_1 = polygon_1.area
-        #                 area_roi_2 = polygon_2.area
-        #                 smaller_roi = min(area_roi_1, area_roi_2)
-        #                 if intersection_area >= 0.8 * smaller_roi:
-        #                     overlapped[roi_name_1] = processed_roi_1[roi_name_1]
-        #                     break
-
         # Plot results
         _, axes = plt.subplots(1, 4, figsize=(15, 5))
 
@@ -398,5 +343,4 @@ def colocalize(
             "num_cells": num_cells,
         }
     )
-    df.to_csv(colocalization_folder_path / "colocalization_results.csv", index=False)
-    df.to_excel(colocalization_folder_path / "colocalization_results.xlsx", index=False)
+    export_data(df, colocalization_folder_path, "colocalization_results")

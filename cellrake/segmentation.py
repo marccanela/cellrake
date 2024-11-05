@@ -209,6 +209,9 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
     np.ndarray
         A combined binary image.
     """
+    if not (0 <= threshold_rel <= 1):
+        raise ValueError("threshold_rel must be between 0 and 1.")
+
     # Detect blobs using Laplacian of Gaussian (LoG)
     blobs_log = feature.blob_log(
         layer,
@@ -236,7 +239,6 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
 
     # Collect all labels and their sizes from all segment arrays
     label_sizes = {}
-
     for seg_array in binaries:
         unique_labels = np.unique(seg_array[seg_array != 0])
         for label in unique_labels:
