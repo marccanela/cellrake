@@ -61,9 +61,8 @@ def iterate_segmentation(
     image_folder: Path, threshold_rel: float
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
     """
-    This function iterates over all `.tif` files in the given `image_folder`, applies a pre-trained StarDist model
-    to segment the images, and extracts ROIs. The segmented layers and corresponding ROI data are stored in dictionaries
-    with the image filename (without extension) as the key.
+    This function iterates over all `.tif` files in the given `image_folder,` extracting all the potential regions of interest (ROIs) that may be positive.
+    The segmented layers and corresponding ROI data are stored in dictionaries with the image filename (without extension) as the key.
 
     Parameters:
     ----------
