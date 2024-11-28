@@ -12,7 +12,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.metrics import f1_score, log_loss, roc_auc_score
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -205,7 +205,7 @@ def active_learning(
         subset_df, test_size=test_size, stratify=subset_df["cluster"], random_state=42
     )
 
-    # Label 10% of the data (max 100 instances) of train_val_X set
+    # Label 10% of the data (max 100 instances) of train_X set
     initial_sample_size = min(int(0.1 * len(train_X)), 50)
     train_X_labeled, train_X_unlabeled = train_test_split(
         train_X,
@@ -231,8 +231,11 @@ def active_learning(
     y_test = test_y["label_column"].astype(int)
 
     # Initialize the active learning
-
+    previous_loss = None
+    min_delta = 0.001
+    iteration = 1
     performance_scores = []
+    models = []
     while True:
 
         # 1) Train
@@ -247,32 +250,35 @@ def active_learning(
                 f"Unsupported model type: {model_type}. Choose from 'svm', 'rf', or 'logreg'."
             )
 
-        # 2) Evaluate
+        models.append(model)
+
+        # 2) Evaluate (cross-entropy loss)
         f1 = f1_score(y_test, model.predict(X_test.values))
         roc_auc = roc_auc_score(y_test, model.predict_proba(X_test.values)[:, 1])
+        validation_loss = log_loss(y_test, model.predict_proba(X_test.values))
 
-        performance_scores.append({"f1": f1, "roc_auc": roc_auc})
-        print(
-            f"Iteration {len(performance_scores)}: F1-Score = {f1:.4f}, ROC-AUC = {roc_auc:.4f}"
+        performance_scores.append(
+            {
+                "iteration": iteration,
+                "f1": f1,
+                "roc_auc": roc_auc,
+                "loss": validation_loss,
+            }
         )
 
-        # Check if the improvement in performance is minimal or both metrics have reached the maximum value of 1
-        if len(performance_scores) > 1:
-            if (
-                (performance_scores[-1]["f1"] - performance_scores[-2]["f1"] < 0.01)
-                and (
-                    performance_scores[-1]["roc_auc"]
-                    - performance_scores[-2]["roc_auc"]
-                    < 0.01
-                )
-            ) or (
-                performance_scores[-1]["f1"] == 1
-                and performance_scores[-1]["roc_auc"] == 1
-            ):
-                print(
-                    "Performance improvement is minimal or metrics reached maximum, stopping the iteration."
-                )
-                break
+        # Check if the improvement in performance is minimal
+        if previous_loss is not None and (previous_loss - validation_loss) < min_delta:
+            print("Loss improvement is minimal, stopping the iteration.")
+
+            # If loss has increased, revert to the previous model
+            if validation_loss > previous_loss:
+                model = models[-2]
+                performance_scores = performance_scores[:-1]
+            break
+
+        # Update previous_loss for the next iteration
+        previous_loss = validation_loss
+        iteration += 1  # Increment iteration count
 
         # 3) Predict and Extract
         # Calculate uncertainty
@@ -298,36 +304,40 @@ def active_learning(
         X_unlabeled = X_unlabeled.drop(X_uncertain.index)
 
     # Plotting the evolution of ROC-AUC and F1-Score over iterations
-    iterations = list(range(1, len(performance_scores) + 1))
-    f1_scores = [score["f1"] for score in performance_scores]
-    roc_auc_scores = [score["roc_auc"] for score in performance_scores]
+    # Export performance scores
+    performance_df = pd.DataFrame(performance_scores)
 
-    plt.figure(figsize=(14, 7))
+    # Plot the F1 Score, ROC-AUC, and Loss for each iteration
+    plt.figure(figsize=(10, 6))
 
-    # Plot F1-Score
-    plt.subplot(1, 2, 1)
-    plt.plot(iterations, f1_scores, marker="o", color="blue")
-    plt.title("F1-Score Evolution Over Iterations")
+    # Plotting each metric
+    plt.plot(
+        performance_df["iteration"], performance_df["f1"], label="F1 Score", marker="o"
+    )
+    plt.plot(
+        performance_df["iteration"],
+        performance_df["roc_auc"],
+        label="ROC-AUC",
+        marker="o",
+    )
+    plt.plot(
+        performance_df["iteration"],
+        performance_df["loss"],
+        label="Cross-entropy Loss",
+        marker="o",
+    )
+
+    # Adding labels and title
     plt.xlabel("Iteration")
-    plt.ylabel("F1-Score")
-    plt.ylim(0, 1)
-    plt.xticks(ticks=range(min(iterations), max(iterations) + 1))
-    plt.grid(True)
-
-    # Plot ROC-AUC
-    plt.subplot(1, 2, 2)
-    plt.plot(iterations, roc_auc_scores, marker="o", color="green")
-    plt.title("ROC-AUC Evolution Over Iterations")
-    plt.xlabel("Iteration")
-    plt.ylabel("ROC-AUC")
-    plt.ylim(0, 1)
-    plt.xticks(ticks=range(min(iterations), max(iterations) + 1))
-    plt.grid(True)
+    plt.ylabel("Score / Loss")
+    plt.title("Performance Metrics Over Training Iterations")
+    plt.legend()
+    plt.grid()
 
     plt.tight_layout()
     plt.show()
 
-    return model
+    return model, performance_df
 
 
 def manual_labeling(
@@ -445,11 +455,13 @@ def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier
     rf = RandomForestClassifier(random_state=42)
 
     # Define the hyperparameter grid
-    n_estimators = [int(x) for x in np.linspace(start=200, stop=2000, num=10)]
-    max_features = ["auto", "sqrt"]
-    max_depth = [int(x) for x in np.linspace(10, 110, num=11)] + [None]
-    min_samples_split = [2, 5, 10]
-    min_samples_leaf = [1, 2, 4]
+    n_estimators = [
+        int(x) for x in np.linspace(start=200, stop=1500, num=10)
+    ]  # 200-2000
+    max_features = ["sqrt", "log2", None]
+    max_depth = [int(x) for x in np.linspace(5, 50, num=11)]  # 10-110
+    min_samples_split = [10, 20, 30]  # 2, 5, 10
+    min_samples_leaf = [5, 10, 20]  # 1, 2, 4
     bootstrap = [True, False]
 
     param_dist = {

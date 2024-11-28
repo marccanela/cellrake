@@ -2,6 +2,7 @@
 @author: Marc Canela
 """
 
+import pickle as pkl
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -228,6 +229,12 @@ def extract_roi_stats(
     # Create a binary mask for the ROI
     cell_mask = get_cell_mask(layer, coordinates)
 
+    # If the mask is empty, skip
+    if np.mean(cell_mask) == 0:
+        cell_mask = None
+        stats_dict = None
+        return cell_mask, stats_dict
+
     # Crop the layer and mask to the bounding box of the ROI
     layer_cropped = crop_cell(layer, x_coords, y_coords)
     cell_mask_cropped = crop_cell(cell_mask, x_coords, y_coords)
@@ -357,8 +364,10 @@ def create_stats_dict(
     # Extract statistics for each ROI
     for roi_name, roi_info in roi_dict.items():
         cell_mask, stats_dict = extract_roi_stats(layer, roi_info)
-        roi_props[roi_name] = stats_dict
-        cell_masks.append(cell_mask)
+
+        if cell_mask is not None and stats_dict is not None:
+            roi_props[roi_name] = stats_dict
+            cell_masks.append(cell_mask)
 
     # Compute combined background statistics
     combined_cell_mask = np.bitwise_or.reduce(cell_masks)
@@ -463,29 +472,6 @@ def crop_cell_large(
     return layer_cropped, x_coords_cropped, y_coords_cropped
 
 
-def crop(layer: np.ndarray) -> np.ndarray:
-    """
-    This function trims the input image layer to remove any rows or columns that contain only zero values.
-
-    Parameters:
-    ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
-
-    Returns:
-    -------
-    numpy.ndarray
-        The cropped image layer with zero-only rows and columns removed.
-    """
-    # Remove rows that are entirely zeros
-    layer = layer[~np.all(layer == 0, axis=1)]
-
-    # Remove columns that are entirely zeros
-    layer = layer[:, ~np.all(layer == 0, axis=0)]
-
-    return layer
-
-
 def fix_polygon(polygon: Polygon) -> Polygon:
     """
     This function checks if the provided polygon is valid. If it is not valid, it attempts to fix the polygon by
@@ -512,3 +498,26 @@ def fix_polygon(polygon: Polygon) -> Polygon:
             return None
 
     return polygon
+
+
+def crop(layer: np.ndarray) -> np.ndarray:
+    """
+    This function trims the input image layer to remove any rows or columns that contain only zero values.
+
+    Parameters:
+    ----------
+    layer : numpy.ndarray
+        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
+
+    Returns:
+    -------
+    numpy.ndarray
+        The cropped image layer with zero-only rows and columns removed.
+    """
+    # Remove rows that are entirely zeros
+    layer = layer[~np.all(layer == 0, axis=1)]
+
+    # Remove columns that are entirely zeros
+    layer = layer[:, ~np.all(layer == 0, axis=0)]
+
+    return layer

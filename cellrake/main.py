@@ -22,6 +22,75 @@ from cellrake.training import active_learning, create_subset_df
 from cellrake.utils import build_project, crop
 
 
+def look_for_segmentation(project_folder, image_folder, threshold_rel):
+    """
+    Check for existing segmentation results or perform segmentation on images.
+
+    This function checks if a segmentation file already exists for the specified
+    `project_folder`. If it exists, it loads the file and returns the segmentation data.
+    If not, it performs segmentation on the images in `image_folder` based on a given
+    threshold, saves the results, and returns them.
+
+    Parameters
+    ----------
+    project_folder : Path
+        The directory path where the project files are stored, including any
+        existing segmentation data.
+    image_folder : Path
+        The directory path containing the images to be segmented.
+    threshold_rel : float
+        The relative threshold used for segmentation in `iterate_segmentation`.
+
+    Returns
+    -------
+    rois : dict
+        A dictionary containing segmented regions of interest (ROIs) for each image.
+    layers : dict
+        A dictionary containing the processed layers for each image in `image_folder`.
+    """
+    # Check if there is an existing segmentation
+    rois_path = project_folder / f"{image_folder.stem}_segmentation.pkl"
+    if rois_path.exists():
+        print(f"Existing segmentation detected.")
+
+        # Open segmentation
+        try:
+            with open(rois_path, "rb") as file:
+                rois = pkl.load(file)
+        except Exception as e:
+            raise RuntimeError(f"Error loading existing segmentation file: {e}")
+
+        # Create layers dictionary
+        layers = {}
+        for tif_path in tqdm(
+            list(image_folder.glob("*.tif")), desc="Openining images", unit="image"
+        ):
+            try:
+                layer = np.asarray(Image.open(tif_path))
+                layer = crop(layer)
+                layer = layer.astype(np.uint8)
+                tag = tif_path.stem
+                layers[tag] = layer
+            except Exception as e:
+                raise RuntimeError(f"Error processing image {tif_path.stem}: {e}")
+
+    else:
+        # Segment images to obtain two dictionaries: 'rois' and 'layers'
+        try:
+            rois, layers = iterate_segmentation(image_folder, threshold_rel)
+        except Exception as e:
+            raise RuntimeError(f"Error during segmentation: {e}")
+
+        # Save the rois
+        try:
+            with open(rois_path, "wb") as file:
+                pkl.dump(rois, file)
+        except Exception as e:
+            raise RuntimeError(f"Error saving segmentation results: {e}")
+
+    return rois, layers
+
+
 def train(
     image_folder: Path, threshold_rel: float, model_type: str = "svm"
 ) -> Union[Pipeline, SVC, RandomForestClassifier, LogisticRegression]:
@@ -45,18 +114,23 @@ def train(
     sklearn Pipeline or RandomForestClassifier
         The best estimator found by the active learning.
     """
-
     # Validate model type
     if model_type not in {"svm", "rf", "logreg"}:
         raise ValueError(
             f"Invalid model type '{model_type}'. Choose from 'svm', 'rf', or 'logreg'."
         )
 
-    # Segment images to obtain ROIs and layers
+    # Create the base project folder with "_training" suffix
+    project_folder = image_folder.parent / f"{image_folder.stem}_training"
+    project_folder.mkdir(parents=True, exist_ok=True)
+
+    # Check if there is an existing segmentation
     try:
-        rois, layers = iterate_segmentation(image_folder, threshold_rel)
+        rois, layers = look_for_segmentation(
+            project_folder, image_folder, threshold_rel
+        )
     except Exception as e:
-        raise RuntimeError(f"Error during segmentation: {e}")
+        raise RuntimeError(f"Error segmenting the images: {e}")
 
     # Extract features and labels from ROIs
     try:
@@ -64,15 +138,11 @@ def train(
     except Exception as e:
         raise RuntimeError(f"Error extracting features and labels: {e}")
 
-    # Perform active learning and handle potential issues
+    # Perform active learning
     try:
-        model = active_learning(subset_df, rois, layers, model_type)
+        model, performance_df = active_learning(subset_df, rois, layers, model_type)
     except Exception as e:
         raise RuntimeError(f"Error during active learning: {e}")
-
-    # Create the base project folder with "_training" suffix
-    project_folder = image_folder.parent / f"{image_folder.stem}_training"
-    project_folder.mkdir(parents=True, exist_ok=True)
 
     # Save the trained model
     try:
@@ -83,12 +153,13 @@ def train(
     except Exception as e:
         raise RuntimeError(f"Error saving the model: {e}")
 
-    # Save the rois
+    # Save the metrics
     try:
-        with open(project_folder / f"{image_folder.stem}_rois.pkl", "wb") as file:
-            pkl.dump(rois, file)
+        performance_df.to_csv(
+            project_folder / "training_performance_metrics.csv", index=False
+        )
     except Exception as e:
-        raise RuntimeError(f"Error saving ROIs: {e}")
+        raise RuntimeError(f"Error exporting training performance metrics: {e}")
 
     return model
 
@@ -132,44 +203,12 @@ def analyze(
     project_folder = build_project(image_folder)
 
     # Check if there is an existing segmentation
-    rois_path = project_folder / f"{image_folder.stem}_segmentation.pkl"
-    if rois_path.exists():
-        print(f"Existing segmentation detected.")
-
-        # Open segmentation
-        try:
-            with open(rois_path, "rb") as file:
-                rois = pkl.load(file)
-        except Exception as e:
-            raise RuntimeError(f"Error loading existing segmentation file: {e}")
-
-        # Create layers dictionary
-        layers = {}
-        for tif_path in tqdm(
-            list(image_folder.glob("*.tif")), desc="Openining images", unit="image"
-        ):
-            try:
-                layer = np.asarray(Image.open(tif_path))
-                layer = crop(layer)
-                layer = layer.astype(np.uint8)
-                tag = tif_path.stem
-                layers[tag] = layer
-            except Exception as e:
-                raise RuntimeError(f"Error processing image {tif_path.stem}: {e}")
-
-    else:
-        # Segment images to obtain two dictionaries: 'rois' and 'layers'
-        try:
-            rois, layers = iterate_segmentation(image_folder, threshold_rel)
-        except Exception as e:
-            raise RuntimeError(f"Error during segmentation: {e}")
-
-        # Save the rois
-        try:
-            with open(rois_path, "wb") as file:
-                pkl.dump(rois, file)
-        except Exception as e:
-            raise RuntimeError(f"Error saving segmentation results: {e}")
+    try:
+        rois, layers = look_for_segmentation(
+            project_folder, image_folder, threshold_rel
+        )
+    except Exception as e:
+        raise RuntimeError(f"Error segmenting the images: {e}")
 
     # Apply the prediction model to the layers and ROIs
     try:
