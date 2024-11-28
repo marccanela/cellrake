@@ -422,7 +422,14 @@ def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
 
     # Perform randomized search with cross-validation
     random_search = RandomizedSearchCV(
-        pipeline, param_dist, n_iter=100, cv=5, random_state=42, n_jobs=-1, verbose=0
+        pipeline,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
     )
 
     # Fit the model to the training data
@@ -475,7 +482,14 @@ def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier
 
     # Set up RandomizedSearchCV
     random_search = RandomizedSearchCV(
-        rf, param_dist, n_iter=100, cv=5, random_state=42, n_jobs=-1, verbose=0
+        rf,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
     )
 
     # Fit RandomizedSearchCV to the data
@@ -521,7 +535,14 @@ def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
 
     # Set up RandomizedSearchCV
     random_search = RandomizedSearchCV(
-        pipeline, param_dist, n_iter=100, cv=5, random_state=42, n_jobs=-1, verbose=0
+        pipeline,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
     )
 
     # Fit RandomizedSearchCV to the data
