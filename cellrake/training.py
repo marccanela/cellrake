@@ -217,6 +217,17 @@ def active_learning(
     print("Label the train set:")
     train_y_labeled = manual_labeling(train_X_labeled, rois, layers)
 
+    # Check if all labels are zeros
+    while (
+        train_y_labeled["label_column"].astype(int).nunique() == 1
+        and train_y_labeled["label_column"].astype(int).unique()[0] == 0
+    ):
+        print("All labels in the the train set are zeros. Re-sampling and re-labeling.")
+        train_X_labeled, train_X_unlabeled = train_test_split(
+            train_X, train_size=initial_sample_size, stratify=train_X["cluster"]
+        )
+        train_y_labeled = manual_labeling(train_X_labeled, rois, layers)
+
     # Label the test_X set
     print("Label the test set:")
     test_y = manual_labeling(test_X, rois, layers)
