@@ -399,10 +399,12 @@ def active_learning(
     # Export performance scores
     performance_df = pd.DataFrame(metrics_list)
 
-    # Roll back to the best model with the minimum binary_cross_entropy_loss
-    min_loss_index = performance_df["binary_cross_entropy_loss"].idxmin()
-    best_model = models_list[min_loss_index]
-    print(f"Rolling back to model with minimum loss (iteration {min_loss_index + 1})")
+    # Roll back to the fourth model from the end
+    rollback_index = -4
+    best_model = models_list[rollback_index]
+    print(
+        f"Rolling back to the model from interation (iteration {len(models_list) + rollback_index + 1})"
+    )
 
     # Plot the PR-AUC, Precision, Recall, F1 Score, and Loss for each iteration
     plt.figure(figsize=(12, 8))
