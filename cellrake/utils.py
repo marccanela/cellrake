@@ -521,3 +521,31 @@ def crop(layer: np.ndarray) -> np.ndarray:
     layer = layer[:, ~np.all(layer == 0, axis=0)]
 
     return layer
+
+
+def balance_classes(labelled_Xy: pd.DataFrame) -> pd.DataFrame:
+    """
+    This function balances the classes in the labelled dataset by reducing both classes to the size of the smaller class.
+
+    Parameters:
+    ----------
+    labelled_Xy : pd.DataFrame
+        A DataFrame where each row corresponds to an ROI and each column contains its features, including the label column.
+
+    Returns:
+    -------
+    pd.DataFrame
+        A balanced DataFrame with an equal number of samples from each class.
+    """
+    class_0_Xy = labelled_Xy[labelled_Xy["label_column"] == "0"]
+    class_1_Xy = labelled_Xy[labelled_Xy["label_column"] == "1"]
+    min_class_size = min(len(class_0_Xy), len(class_1_Xy))
+
+    # Reduce both classes to the minimum class size
+    class_0_Xy_reduced = class_0_Xy.sample(n=min_class_size, random_state=42)
+    class_1_Xy_reduced = class_1_Xy.sample(n=min_class_size, random_state=42)
+
+    # Combine the reduced datasets
+    balanced_Xy = pd.concat([class_0_Xy_reduced, class_1_Xy_reduced])
+
+    return balanced_Xy

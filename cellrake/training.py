@@ -12,14 +12,26 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score, log_loss, roc_auc_score
-from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.metrics import (
+    auc,
+    f1_score,
+    log_loss,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import (
+    RandomizedSearchCV,
+    cross_val_predict,
+    train_test_split,
+)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from tqdm import tqdm
 
-from cellrake.utils import create_stats_dict, crop_cell_large
+from cellrake.utils import balance_classes, create_stats_dict, crop_cell_large
 
 
 def user_input(roi_values: np.ndarray, layer: np.ndarray) -> Dict[str, Dict[str, int]]:
@@ -126,33 +138,38 @@ def create_subset_df(
             input_features[f"{tag}_{roi_num}"] = stats
     features_df = pd.DataFrame.from_dict(input_features, orient="index")
 
+    if features_df.empty:
+        raise ValueError("The features DataFrame is empty. Please provide a valid one.")
+
     # Cluster the features to aproximate the positive/negative classes
-    kmeans_2_pipeline = Pipeline(
+    kmeans_pipeline = Pipeline(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=0.95, random_state=42)),
-            ("kmeans", KMeans(n_clusters=2, random_state=42)),
+            ("kmeans", KMeans(n_clusters=10, random_state=42)),
         ]
     )
-    best_clusters = kmeans_2_pipeline.fit_predict(features_df)
+    best_clusters = kmeans_pipeline.fit_predict(features_df)
     features_df["cluster"] = best_clusters
 
-    # Equilibrate both classes
-    cluster_counts = features_df["cluster"].value_counts()
-    size = np.min(cluster_counts)
+    subset_df = features_df.copy()
 
-    sampled_dfs = []
-    for cluster in features_df["cluster"].unique():
-        cluster_df = features_df[features_df["cluster"] == cluster]
+    # # Equilibrate both classes
+    # cluster_counts = features_df["cluster"].value_counts()
+    # size = np.min(cluster_counts)
 
-        if len(cluster_df) >= size:
-            sampled_df = cluster_df.sample(n=size, random_state=42)
-        else:
-            sampled_df = cluster_df
+    # sampled_dfs = []
+    # for cluster in features_df["cluster"].unique():
+    #     cluster_df = features_df[features_df["cluster"] == cluster]
 
-        sampled_dfs.append(sampled_df)
+    #     if len(cluster_df) >= size:
+    #         sampled_df = cluster_df.sample(n=size, random_state=42)
+    #     else:
+    #         sampled_df = cluster_df
 
-    subset_df = pd.concat(sampled_dfs)
+    #     sampled_dfs.append(sampled_df)
+
+    # subset_df = pd.concat(sampled_dfs)
 
     # Ensure specific columns have the correct data types
     subset_df["min_intensity"] = subset_df["min_intensity"].astype(int)
@@ -199,141 +216,225 @@ def active_learning(
         The best estimator found by active learning.
     """
 
-    # Split the dataset into train and test sets
-    test_size = min(int(0.2 * len(subset_df)), 100)
-    train_X, test_X = train_test_split(
-        subset_df, test_size=test_size, stratify=subset_df["cluster"], random_state=42
-    )
+    # Identify the nature of the clusters
+    pool_X = subset_df.copy()
+    clusters = pool_X["cluster"].unique()
 
-    # Label 10% of the data (max 100 instances) of train_X set
-    initial_sample_size = min(int(0.1 * len(train_X)), 50)
-    train_X_labeled, train_X_unlabeled = train_test_split(
-        train_X,
-        train_size=initial_sample_size,
-        stratify=train_X["cluster"],
-        random_state=42,
-    )
-
-    print("Label the train set:")
-    train_y_labeled = manual_labeling(train_X_labeled, rois, layers)
-
-    # Check if all labels are zeros
-    while (
-        train_y_labeled["label_column"].astype(int).nunique() == 1
-        and train_y_labeled["label_column"].astype(int).unique()[0] == 0
-    ):
-        print("All labels in the the train set are zeros. Re-sampling and re-labeling.")
-        train_X_labeled, train_X_unlabeled = train_test_split(
-            train_X, train_size=initial_sample_size, stratify=train_X["cluster"]
-        )
-        train_y_labeled = manual_labeling(train_X_labeled, rois, layers)
-
-    # Label the test_X set
-    print("Label the test set:")
-    test_y = manual_labeling(test_X, rois, layers)
-
-    # Create datasets
-    X_labeled = train_X_labeled.drop(columns=["cluster"])
-    y_labeled = train_y_labeled["label_column"].astype(int)
-    X_unlabeled = train_X_unlabeled.drop(columns=["cluster"])
-
-    # Prepare test dataset
-    X_test = test_X.drop(columns=["cluster"])
-    y_test = test_y["label_column"].astype(int)
-
-    # Initialize the active learning
-    previous_loss = None
-    min_delta = 0.001
-    iteration = 1
-    performance_scores = []
-    models = []
-    while True:
-
-        # 1) Train
-        if model_type == "svm":
-            model = train_svm(X_labeled.values, y_labeled.values)
-        elif model_type == "rf":
-            model = train_rf(X_labeled.values, y_labeled.values)
-        elif model_type == "logreg":
-            model = train_logreg(X_labeled.values, y_labeled.values)
+    exploratory_dfs = []
+    for cluster in clusters:
+        cluster_df = pool_X[pool_X["cluster"] == cluster]
+        if len(cluster_df) >= 5:
+            sampled_df = cluster_df.sample(n=5, random_state=42)
         else:
-            raise ValueError(
-                f"Unsupported model type: {model_type}. Choose from 'svm', 'rf', or 'logreg'."
-            )
+            sampled_df = cluster_df
+        exploratory_dfs.append(sampled_df)
 
-        models.append(model)
+    exploratory_df = pd.concat(exploratory_dfs)
+    pool_X.drop(exploratory_df.index, inplace=True)  # Unselected entries
 
-        # 2) Evaluate (cross-entropy loss)
-        f1 = f1_score(y_test, model.predict(X_test.values))
-        roc_auc = roc_auc_score(y_test, model.predict_proba(X_test.values)[:, 1])
-        validation_loss = log_loss(y_test, model.predict_proba(X_test.values))
+    exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
+    labelled_X = exploratory_df
+    labelled_y = exploratory_df_labeled
 
-        performance_scores.append(
-            {
-                "iteration": iteration,
-                "f1": f1,
-                "roc_auc": roc_auc,
-                "loss": validation_loss,
-            }
-        )
-
-        # Check if the improvement in performance is minimal
-        if previous_loss is not None and (previous_loss - validation_loss) < min_delta:
-            print("Loss improvement is minimal, stopping the iteration.")
-
-            # If loss has increased, revert to the previous model
-            if validation_loss > previous_loss:
-                model = models[-2]
-                performance_scores = performance_scores[:-1]
+    while True:
+        positives = labelled_y["label_column"].astype(int).sum()
+        print(f"You have identified {positives} positive segmentations.")
+        if pool_X.empty:
+            break
+        more_labeling = input("Do you want to label more data? (y/n): ").strip().lower()
+        if more_labeling == "n":
             break
 
-        # Update previous_loss for the next iteration
-        previous_loss = validation_loss
+        # Identify clusters enriched in manual labeling "1" and "0"
+        enriched_clusters_1 = []
+        enriched_clusters_0 = []
+
+        for cluster in clusters:
+            cluster_indices = labelled_X[labelled_X["cluster"] == cluster].index
+            cluster_labels = labelled_y.loc[cluster_indices, "label_column"].astype(int)
+            if cluster_labels.sum() > len(cluster_labels) / 2:
+                enriched_clusters_1.append(cluster)
+            else:
+                enriched_clusters_0.append(cluster)
+
+        # If enriched_clusters_1 is empty, make the condition less strict
+        if not enriched_clusters_1:
+            for cluster in clusters:
+                cluster_indices = labelled_X[labelled_X["cluster"] == cluster].index
+                cluster_labels = labelled_y.loc[cluster_indices, "label_column"].astype(
+                    int
+                )
+                if cluster_labels.sum() > 0:
+                    enriched_clusters_1.append(cluster)
+
+        # Extract 5 instances from each enriched cluster
+        if len(enriched_clusters_1) > 0:
+            num_clusters_1 = len(enriched_clusters_1)
+            num_clusters_0 = min(len(enriched_clusters_0), num_clusters_1)
+
+            selected_clusters_0 = np.random.choice(
+                enriched_clusters_0, num_clusters_0, replace=False
+            ).tolist()
+            selected_clusters = enriched_clusters_1 + selected_clusters_0
+        else:
+            selected_clusters = clusters
+
+        exploratory_dfs = []
+        for cluster in selected_clusters:
+            cluster_df = pool_X[pool_X["cluster"] == cluster]
+            if len(cluster_df) >= 5:
+                sampled_df = cluster_df.sample(n=5, random_state=42)
+            else:
+                sampled_df = cluster_df
+            exploratory_dfs.append(sampled_df)
+
+        exploratory_df = pd.concat(exploratory_dfs)
+        pool_X = pool_X.drop(exploratory_df.index)
+
+        exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
+        labelled_X = pd.concat([labelled_X, exploratory_df], ignore_index=True)
+        labelled_y = pd.concat([labelled_y, exploratory_df_labeled], ignore_index=True)
+
+    pool_X = pool_X.drop(columns=["cluster"])
+
+    # Balance train dataset
+    labelled_Xy = pd.concat([labelled_X, labelled_y], axis=1)
+    labelled_Xy = labelled_Xy.drop(columns=["cluster"])
+    balanced_Xy = balance_classes(labelled_Xy)
+
+    # Prepare datasets
+    X_labeled = balanced_Xy.drop(columns=["label_column"])
+    y_labeled = balanced_Xy["label_column"].astype(int)
+
+    # Initialize the ACTIVE LEARNING
+    previous_loss = None
+    min_delta = 0.001
+    iteration = 0
+    patience = 3
+    models_list = []
+    metrics_list = []
+    while True:
+
+        # Train
+        if model_type == "svm":
+            best_model, metrics = train_svm(X_labeled.values, y_labeled.values)
+        elif model_type == "rf":
+            best_model, metrics = train_rf(X_labeled.values, y_labeled.values)
+        elif model_type == "logreg":
+            best_model, metrics = train_logreg(X_labeled.values, y_labeled.values)
+        else:
+            print(f"Unsupported model type: {model_type}. Using 'svm' as default.")
+            best_model, metrics = train_svm(X_labeled.values, y_labeled.values)
+
+        models_list.append(best_model)
+        metrics_list.append(metrics)
+
         iteration += 1  # Increment iteration count
+        print(f"Iteration {iteration}")
 
-        # 3) Predict and Extract
-        # Calculate uncertainty
-        # Closer to 1 indicates that the model is highly uncertain about that instance
-        # Uncertainty is calculated based on how close the probabilities are to a 50/50 split
-        uncertainties = 1 - np.max(model.predict_proba(X_unlabeled.values), axis=1)
+        # Check if the improvement in performance is minimal
+        current_loss = metrics["binary_cross_entropy_loss"]
+        if previous_loss is not None:
+            if current_loss > previous_loss:
+                patience -= 1
+                print(f"Current loss increased to {current_loss}")
+                print(f"Patience left: {patience}")
+                if patience == 0:
+                    print(f"Stopping the iteration due to divergence")
+                    break
+            elif (previous_loss - current_loss) < min_delta:
+                patience -= 1
+                print(f"Current loss: {current_loss}")
+                print(f"Minimal loss improvement ({previous_loss - current_loss})")
+                print(f"Patience left: {patience}")
+                if patience == 0:
+                    print(f"Stopping the iteration due to minimal improvement")
+                    break
+            else:
+                patience = 3  # Reset patience
+                print(f"Current loss: {current_loss}")
+        else:
+            print(f"Current loss: {current_loss}")
 
-        # Sort by uncertainty (highest uncertainty first)
-        uncertain_indices = np.argsort(uncertainties)[-initial_sample_size // 2 :]
+        if pool_X.empty:
+            break
 
-        # Recollect Uncertain Instances for Manual Labeling
-        X_uncertain = X_unlabeled.iloc[uncertain_indices]
+        previous_loss = current_loss
 
-        # 4) Label
+        # Predict and Extract (Least Confidence Sampling)
+
+        # Predict probabilities for the unlabeled pool
+        probs = best_model.predict_proba(pool_X.values)
+
+        # Compute uncertainties using Least Confidence
+        uncertainties = 1 - np.max(probs, axis=1)
+
+        # Define batch size
+        if len(pool_X) < 20:
+            batch_size = len(pool_X)
+        else:
+            batch_size = 20
+
+        # Get indices of the most uncertain samples
+        query_indices = np.argsort(uncertainties)[-batch_size:]
+
+        # Extract the most uncertain samples
+        X_uncertain = pool_X.iloc[query_indices]
+
+        # Label the uncertain samples
         y_uncertain = manual_labeling(X_uncertain, rois, layers)
-        y_uncertain = y_uncertain["label_column"].astype(int)
 
-        # Add newly labeled data to the labeled dataset
-        X_labeled = pd.concat([X_labeled, X_uncertain])
-        y_labeled = pd.concat([y_labeled, y_uncertain])
+        # Remove the newly labeled data from the pool dataset
+        pool_X = pool_X.drop(X_uncertain.index)
 
-        # Remove the newly labeled data from the unlabeled dataset
-        X_unlabeled = X_unlabeled.drop(X_uncertain.index)
+        # Combine the newly labeled data with the previously labeled dataset
+        uncertain_Xy = pd.concat([X_uncertain, y_uncertain], axis=1)
+        labelled_Xy = pd.concat([labelled_Xy, uncertain_Xy], ignore_index=True)
 
-    # Plotting the evolution of ROC-AUC and F1-Score over iterations
+        # Balance the newly labeled dataset and prepare for the next iteration
+        balanced_Xy = balance_classes(labelled_Xy)
+        X_labeled = balanced_Xy.drop(columns=["label_column"])
+        y_labeled = balanced_Xy["label_column"].astype(int)
+
     # Export performance scores
-    performance_df = pd.DataFrame(performance_scores)
+    performance_df = pd.DataFrame(metrics_list)
 
-    # Plot the F1 Score, ROC-AUC, and Loss for each iteration
-    plt.figure(figsize=(10, 6))
+    # Roll back to the best model with the minimum binary_cross_entropy_loss
+    min_loss_index = performance_df["binary_cross_entropy_loss"].idxmin()
+    best_model = models_list[min_loss_index]
+    print(f"Rolling back to model with minimum loss (iteration {min_loss_index + 1})")
+
+    # Plot the PR-AUC, Precision, Recall, F1 Score, and Loss for each iteration
+    plt.figure(figsize=(12, 8))
 
     # Plotting each metric
     plt.plot(
-        performance_df["iteration"], performance_df["f1"], label="F1 Score", marker="o"
-    )
-    plt.plot(
-        performance_df["iteration"],
-        performance_df["roc_auc"],
-        label="ROC-AUC",
+        performance_df.index + 1,
+        performance_df["pr_auc"],
+        label="PR-AUC",
         marker="o",
     )
     plt.plot(
-        performance_df["iteration"],
-        performance_df["loss"],
+        performance_df.index + 1,
+        performance_df["precision"],
+        label="Precision",
+        marker="o",
+    )
+    plt.plot(
+        performance_df.index + 1,
+        performance_df["recall"],
+        label="Recall",
+        marker="o",
+    )
+    plt.plot(
+        performance_df.index + 1,
+        performance_df["f1_score"],
+        label="F1 Score",
+        marker="o",
+    )
+    plt.plot(
+        performance_df.index + 1,
+        performance_df["binary_cross_entropy_loss"],
         label="Cross-entropy Loss",
         marker="o",
     )
@@ -348,7 +449,7 @@ def active_learning(
     plt.tight_layout()
     plt.show()
 
-    return model, performance_df
+    return best_model, performance_df
 
 
 def manual_labeling(
@@ -398,9 +499,12 @@ def manual_labeling(
     return labels_df
 
 
-def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
+def train_svm(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
     """
-    This function trains an SVM model with hyperparameter tuning using RandomizedSearchCV.
+    This function trains an SVM model with hyperparameter tuning using RandomizedSearchCV and performs cross-validation
+    to extract PR-AUC, precision, recall, F1 score, and binary cross-entropy loss.
 
     Parameters:
     ----------
@@ -413,6 +517,7 @@ def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     Returns:
     -------
     best_model: The best estimator found by the random search, ready for prediction.
+    metrics: A dictionary containing the cross-validated metrics.
     """
 
     # Create a pipeline with scaling, PCA, and SVM
@@ -449,12 +554,37 @@ def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return best_model
+    # Perform cross-validation to get predictions
+    y_pred_proba = cross_val_predict(
+        best_model, X_train, y_train, cv=5, method="predict_proba"
+    )[:, 1]
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+
+    # Calculate metrics
+    precision, recall, _ = precision_recall_curve(y_train, y_pred_proba)
+    pr_auc = auc(recall, precision)
+    precision_score_value = precision_score(y_train, y_pred)
+    recall_score_value = recall_score(y_train, y_pred)
+    f1_score_value = f1_score(y_train, y_pred)
+    binary_cross_entropy_loss = log_loss(y_train, y_pred_proba)
+
+    metrics = {
+        "pr_auc": pr_auc,
+        "precision": precision_score_value,
+        "recall": recall_score_value,
+        "f1_score": f1_score_value,
+        "binary_cross_entropy_loss": binary_cross_entropy_loss,
+    }
+
+    return best_model, metrics
 
 
-def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier:
+def train_rf(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[RandomForestClassifier, Dict[str, float]]:
     """
-    This function trains a Random Forest Classifier with hyperparameter tuning using RandomizedSearchCV.
+    This function trains a Random Forest Classifier with hyperparameter tuning using RandomizedSearchCV and performs cross-validation
+    to extract PR-AUC, precision, recall, F1 score, and binary cross-entropy loss.
 
     Parameters:
     ----------
@@ -467,9 +597,10 @@ def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier
     Returns:
     -------
     best_model: The best estimator found by the random search, which is a RandomForestClassifier.
+    metrics: A dictionary containing the cross-validated metrics.
     """
 
-    # Initialize RandomForestClassifier
+    # Initialize RandomForestClassifier for hyperparameter tuning and model training
     rf = RandomForestClassifier(random_state=42)
 
     # Define the hyperparameter grid
@@ -509,12 +640,37 @@ def train_rf(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestClassifier
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return best_model
+    # Perform cross-validation to get predictions
+    y_pred_proba = cross_val_predict(
+        best_model, X_train, y_train, cv=5, method="predict_proba"
+    )[:, 1]
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+
+    # Calculate metrics
+    precision, recall, _ = precision_recall_curve(y_train, y_pred_proba)
+    pr_auc = auc(recall, precision)
+    precision_score_value = precision_score(y_train, y_pred)
+    recall_score_value = recall_score(y_train, y_pred)
+    f1_score_value = f1_score(y_train, y_pred)
+    binary_cross_entropy_loss = log_loss(y_train, y_pred_proba)
+
+    metrics = {
+        "pr_auc": pr_auc,
+        "precision": precision_score_value,
+        "recall": recall_score_value,
+        "f1_score": f1_score_value,
+        "binary_cross_entropy_loss": binary_cross_entropy_loss,
+    }
+
+    return best_model, metrics
 
 
-def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
+def train_logreg(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
     """
-    This function trains a Logistic Regression model with hyperparameter tuning using RandomizedSearchCV.
+    This function trains a Logistic Regression model with hyperparameter tuning using RandomizedSearchCV and performs cross-validation
+    to extract PR-AUC, precision, recall, F1 score, and binary cross-entropy loss.
 
     Parameters:
     ----------
@@ -527,6 +683,7 @@ def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     Returns:
     -------
     best_model: The best estimator found by the random search, which is a Pipeline containing PCA and LogisticRegression.
+    metrics: A dictionary containing the cross-validated metrics.
     """
 
     # Define the pipeline
@@ -562,4 +719,26 @@ def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     # Retrieve the best model from the random search
     best_model = random_search.best_estimator_
 
-    return best_model
+    # Perform cross-validation to get predictions
+    y_pred_proba = cross_val_predict(
+        best_model, X_train, y_train, cv=5, method="predict_proba"
+    )[:, 1]
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+
+    # Calculate metrics
+    precision, recall, _ = precision_recall_curve(y_train, y_pred_proba)
+    pr_auc = auc(recall, precision)
+    precision_score_value = precision_score(y_train, y_pred)
+    recall_score_value = recall_score(y_train, y_pred)
+    f1_score_value = f1_score(y_train, y_pred)
+    binary_cross_entropy_loss = log_loss(y_train, y_pred_proba)
+
+    metrics = {
+        "pr_auc": pr_auc,
+        "precision": precision_score_value,
+        "recall": recall_score_value,
+        "f1_score": f1_score_value,
+        "binary_cross_entropy_loss": binary_cross_entropy_loss,
+    }
+
+    return best_model, metrics
