@@ -254,8 +254,10 @@ def create_combined_binary_image(
             label_dict[next_label] = {"size": size, "seg_array": mask}
             next_label += 1
 
-    # Sort labels by their size (smallest first)
-    sorted_labels = sorted(label_dict.keys(), key=lambda l: label_dict[l]["size"])
+    # Sort labels by their size (biggest first)
+    sorted_labels = sorted(
+        label_dict.keys(), key=lambda l: label_dict[l]["size"], reverse=True
+    )
 
     # Apply the labels to the combined_array in sorted order
     for tag in sorted_labels:
