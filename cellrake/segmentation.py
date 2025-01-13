@@ -240,9 +240,6 @@ def create_combined_binary_image(
     if len(binaries) == 0:
         return np.zeros_like(layer, dtype=np.uint8)
 
-    # Combine all binary masks using logical OR operation
-    combined_array = np.zeros_like(binaries[0], dtype=np.uint8)
-
     # Collect all labels and their sizes from all segment arrays
     next_label = 1
     label_dict = {}
@@ -260,6 +257,7 @@ def create_combined_binary_image(
     )
 
     # Apply the labels to the combined_array in sorted order
+    combined_array = np.zeros_like(binaries[0], dtype=np.uint16)
     for tag in sorted_labels:
         mask = label_dict[tag]["seg_array"]
         combined_array[mask] = tag
