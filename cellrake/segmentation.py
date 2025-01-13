@@ -58,7 +58,7 @@ def convert_to_roi(
 
 
 def iterate_segmentation(
-    image_folder: Path, threshold_rel: float
+    image_folder: Path, threshold_rel: float, watershed: bool
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
     """
     This function iterates over all `.tif` files in the given `image_folder,` extracting all the potential regions of interest (ROIs) that may be positive.
@@ -88,7 +88,7 @@ def iterate_segmentation(
     ):
 
         # Segment the image
-        polygons, layer = segment_image(tif_path, threshold_rel)
+        polygons, layer = segment_image(tif_path, threshold_rel, watershed)
 
         # Store the results in the dictionaries
         tag = tif_path.stem
@@ -121,7 +121,7 @@ def export_rois(project_folder: Path, rois: Dict[str, Dict]) -> None:
             pkl.dump(rois_dict, file)
 
 
-def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
+def process_blob(layer: np.ndarray, blob: np.ndarray, watershed: bool) -> np.ndarray:
     """
     This function processes a single blob to create a binary mask based on Otsu's thresholding.
 
@@ -145,8 +145,8 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     r = r * 1.5 * math.sqrt(2)
 
     # Ensure the blob stays within the image boundaries
-    y = min(max(y, r), layer.shape[0] - r)
-    x = min(max(x, r), layer.shape[1] - r)
+    y = max(min(y, layer.shape[0] - r), r)
+    x = max(min(x, layer.shape[1] - r), r)
 
     # Create a circular disk mask based on the blob's location and radius
     rr, cc = draw.disk((y, x), r, shape=layer.shape)
@@ -176,11 +176,16 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
         return None
 
     # Apply watershed segmentation of identify cells
-    labels_cropped_list = [
-        labels_cropped
-        for cleaned_cropped in cleaned_cropped_list
-        if (labels_cropped := apply_watershed_segmentation(cleaned_cropped)) is not None
-    ]
+    if watershed:
+        labels_cropped_list = [
+            labels_cropped
+            for cleaned_cropped in cleaned_cropped_list
+            if (labels_cropped := apply_watershed_segmentation(cleaned_cropped))
+            is not None
+        ]
+    else:
+        labels_cropped_list = cleaned_cropped_list
+
     if len(labels_cropped_list) == 0:
         return None
 
@@ -192,7 +197,9 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     return labels_list
 
 
-def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.ndarray:
+def create_combined_binary_image(
+    layer: np.ndarray, threshold_rel: float, watershed: bool
+) -> np.ndarray:
     """
     This function creates a combined binary image from detected blobs using Laplacian of Gaussian.
 
@@ -225,7 +232,7 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
     # Process each blob to create a labelled mask
     binaries = []
     for blob in blobs_log:
-        result = process_blob(layer, blob)
+        result = process_blob(layer, blob, watershed)
         if result is not None:
             if isinstance(result, list):
                 binaries.extend(result)
@@ -234,28 +241,26 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
         return np.zeros_like(layer, dtype=np.uint8)
 
     # Combine all binary masks using logical OR operation
-    combined_array = np.zeros_like(binaries[0], dtype=np.uint16)
-    next_label = 1
+    combined_array = np.zeros_like(binaries[0], dtype=np.uint8)
 
     # Collect all labels and their sizes from all segment arrays
-    label_sizes = {}
+    next_label = 1
+    label_dict = {}
     for seg_array in binaries:
         unique_labels = np.unique(seg_array[seg_array != 0])
         for label in unique_labels:
-            if label not in label_sizes:
-                mask = seg_array == label
-                size = np.sum(mask)
-                label_sizes[label] = size
+            mask = seg_array == label
+            size = np.sum(mask)
+            label_dict[next_label] = {"size": size, "seg_array": mask}
+            next_label += 1
 
     # Sort labels by their size (smallest first)
-    sorted_labels = sorted(label_sizes.keys(), key=lambda l: label_sizes[l])
+    sorted_labels = sorted(label_dict.keys(), key=lambda l: label_dict[l]["size"])
 
     # Apply the labels to the combined_array in sorted order
-    for label in sorted_labels:
-        for seg_array in binaries:
-            mask = seg_array == label
-            combined_array[mask] = next_label
-            next_label += 1
+    for tag in sorted_labels:
+        mask = label_dict[tag]["seg_array"]
+        combined_array[mask] = tag
 
     return combined_array
 
@@ -292,11 +297,8 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
     # Calculate the properties of each labeled region
     region_props = measure.regionprops(labeled_mask)
 
-    # Get the areas of the regions
-    areas = np.array([region.area for region in region_props])
-
-    # Identify the largest area
-    max_area = areas.max()
+    # Identify the largest area directly during iteration
+    max_area = max(region.area for region in region_props)
 
     # Disk area for morphological operations
     min_disk_area = np.sum(morphology.disk(4))
@@ -319,9 +321,9 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
         ellipse_area = np.pi * (width / 2) * (height / 2)
         mask_area = np.sum(mask)
         rect_area = height * width
-        diff = mask_area - ellipse_area
+        area_difference = mask_area - ellipse_area
 
-        if diff <= 0.5 * (rect_area - ellipse_area):
+        if area_difference <= 0.5 * (rect_area - ellipse_area):
             masks.append(mask.astype(bool))
 
     return masks
@@ -424,7 +426,7 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
 
 
 def segment_image(
-    tif_path: Path, threshold_rel: float
+    tif_path: Path, threshold_rel: float, watershed: bool
 ) -> Tuple[Dict[int, List], np.ndarray]:
     """
     This function segments an image to identify and extract ROI polygons.
@@ -452,7 +454,7 @@ def segment_image(
     layer = layer.astype(np.uint8)
 
     # Create a binary image of the layer with the segmented cells
-    combined_array = create_combined_binary_image(layer, threshold_rel)
+    combined_array = create_combined_binary_image(layer, threshold_rel, watershed)
 
     # Extract the coordinates of the segmented cells
     polygons = extract_polygons(combined_array)

@@ -8,10 +8,25 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from scipy.stats import uniform
 from shapely.geometry import Polygon
 from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
+from sklearn.decomposition import PCA
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import RandomizedSearchCV, cross_val_predict
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 
 
 def export_data(data, project_folder, file_name):
@@ -523,7 +538,7 @@ def crop(layer: np.ndarray) -> np.ndarray:
     return layer
 
 
-def balance_classes(labelled_Xy: pd.DataFrame) -> pd.DataFrame:
+def balance_classes(labelled_Xy: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     This function balances the classes in the labelled dataset by reducing both classes to the size of the smaller class.
 
@@ -537,15 +552,343 @@ def balance_classes(labelled_Xy: pd.DataFrame) -> pd.DataFrame:
     pd.DataFrame
         A balanced DataFrame with an equal number of samples from each class.
     """
-    class_0_Xy = labelled_Xy[labelled_Xy["label_column"] == "0"]
-    class_1_Xy = labelled_Xy[labelled_Xy["label_column"] == "1"]
+    class_0_Xy = labelled_Xy[labelled_Xy["label_column"] == 0]
+    class_1_Xy = labelled_Xy[labelled_Xy["label_column"] == 1]
     min_class_size = min(len(class_0_Xy), len(class_1_Xy))
 
     # Reduce both classes to the minimum class size
-    class_0_Xy_reduced = class_0_Xy.sample(n=min_class_size, random_state=42)
-    class_1_Xy_reduced = class_1_Xy.sample(n=min_class_size, random_state=42)
+    class_0_index = class_0_Xy.sample(n=min_class_size, random_state=42).index
+    class_1_index = class_1_Xy.sample(n=min_class_size, random_state=42).index
+
+    # Create the reduced datasets using the sampled indices
+    class_0_Xy_reduced = class_0_Xy.loc[class_0_index]
+    class_1_Xy_reduced = class_1_Xy.loc[class_1_index]
 
     # Combine the reduced datasets
     balanced_Xy = pd.concat([class_0_Xy_reduced, class_1_Xy_reduced])
 
-    return balanced_Xy
+    # Create a dataframe for the excluded samples
+    excluded_class_0_Xy = class_0_Xy.drop(class_0_index)
+    excluded_class_1_Xy = class_1_Xy.drop(class_1_index)
+    excluded_Xy = pd.concat([excluded_class_0_Xy, excluded_class_1_Xy])
+
+    return balanced_Xy, excluded_Xy
+
+
+def train_svm(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
+    """
+    This function trains an SVM model with hyperparameter tuning using RandomizedSearchCV
+
+    Parameters:
+    ----------
+    X_train : np.ndarray
+        The training features, a 2D array where each row is a sample and each column is a feature.
+
+    y_train : np.ndarray
+        The training labels, a 1D array where each element is the label for the corresponding sample in X_train.
+
+    Returns:
+    -------
+    best_model: The best estimator found by the random search, ready for prediction.
+    """
+
+    # Create a pipeline with scaling, PCA, and SVM
+    pipeline_steps = [
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=0.95, random_state=42)),
+        ("svm", SVC(kernel="rbf", probability=True, random_state=42)),
+    ]
+    pipeline = Pipeline(pipeline_steps)
+
+    # Define the distribution of hyperparameters for RandomizedSearchCV
+    param_dist = {
+        "svm__C": uniform(1, 100),  # Regularization parameter
+        "svm__gamma": uniform(0.001, 0.1),  # Kernel coefficient for RBF kernel
+    }
+
+    # Perform randomized search with cross-validation
+    random_search = RandomizedSearchCV(
+        pipeline,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
+    )
+
+    # Fit the model to the training data
+    random_search.fit(X_train, y_train)
+
+    # Retrieve the best model from the random search
+    best_model = random_search.best_estimator_
+
+    return best_model
+
+
+def train_rf(
+    X_train: np.ndarray, y_train: np.ndarray, model_type: str = "rf"
+) -> Tuple[RandomForestClassifier, Dict[str, float]]:
+    """
+    This function trains a Random Forest Classifier or Extra Trees Classifier with hyperparameter tuning using RandomizedSearchCV
+
+    Parameters:
+    ----------
+    X_train : np.ndarray
+        The training features, typically a 2D array where each row represents a sample and each column represents a feature.
+
+    y_train : np.ndarray
+        The training labels, typically a 1D array where each element is the label for the corresponding sample in X_train.
+
+    model_type : str, optional
+        The type of model to train. Options are 'rf' (Random Forest) or 'et' (Extra Trees). Default is 'rf'.
+
+    Returns:
+    -------
+    best_model: The best estimator found by the random search, which is a RandomForestClassifier or ExtraTreesClassifier.
+    """
+
+    if model_type == "et":
+        rf = ExtraTreesClassifier(random_state=42)
+    else:
+        rf = RandomForestClassifier(random_state=42)
+
+    # Define the hyperparameter grid
+    param_dist = {
+        "n_estimators": [int(x) for x in np.linspace(start=50, stop=500, num=10)],
+        "max_features": ["sqrt", "log2", None],
+        "max_depth": [int(x) for x in np.linspace(10, 100, num=10)] + [None],
+        "min_samples_split": [2, 5, 10, 15, 20],
+        "min_samples_leaf": [1, 2, 4, 8, 10],
+        "bootstrap": [True, False],
+        "criterion": ["gini", "entropy"],
+    }
+
+    # Set up RandomizedSearchCV
+    random_search = RandomizedSearchCV(
+        rf,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
+    )
+
+    # Fit RandomizedSearchCV to the data
+    random_search.fit(X_train, y_train)
+
+    # Retrieve the best model from the random search
+    best_model = random_search.best_estimator_
+
+    return best_model
+
+
+def train_logreg(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
+    """
+    This function trains a Logistic Regression model with hyperparameter tuning using RandomizedSearchCV
+
+    Parameters:
+    ----------
+    X_train : np.ndarray
+        The training features, typically a 2D array where each row represents a sample and each column represents a feature.
+
+    y_train : np.ndarray
+        The training labels, typically a 1D array where each element is the label for the corresponding sample in X_train.
+
+    Returns:
+    -------
+    best_model: The best estimator found by the random search, which is a Pipeline containing PCA and LogisticRegression.
+    """
+
+    # Define the pipeline
+    pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=0.95, random_state=42)),
+            ("log_reg", LogisticRegression(random_state=42)),
+        ]
+    )
+
+    # Define the hyperparameter grid
+    param_dist = {
+        "log_reg__C": uniform(1, 100),
+    }
+
+    # Set up RandomizedSearchCV
+    random_search = RandomizedSearchCV(
+        pipeline,
+        param_dist,
+        n_iter=100,
+        cv=5,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        error_score="raise",
+    )
+
+    # Fit RandomizedSearchCV to the data
+    random_search.fit(X_train, y_train)
+
+    # Retrieve the best model from the random search
+    best_model = random_search.best_estimator_
+
+    return best_model
+
+
+def train_model(X_labeled, y_labeled, model_type):
+    """
+    Trains a machine learning model based on the specified model type.
+
+    Parameters:
+    ----------
+    X_labeled (pd.DataFrame): The labeled feature data.
+    y_labeled (pd.Series): The labeled target data.
+    model_type (str): The type of model to train. Options are "svm" for Support Vector Machine,
+    "rf" for Random Forest, "et" for Extra Trees, and "logreg" for Logistic Regression.
+
+    Returns:
+    ----------
+    best_model: The trained machine learning model.
+    metrics: A dictionary containing evaluation metrics for the model.
+    """
+    if model_type == "svm":
+        best_model = train_svm(X_labeled, y_labeled)
+    elif model_type in ["rf", "et"]:
+        best_model = train_rf(X_labeled, y_labeled, model_type)
+    elif model_type == "logreg":
+        best_model = train_logreg(X_labeled, y_labeled)
+
+    return best_model
+
+
+def evaluate_model(best_model, X, y):
+    """
+    Evaluate the performance of a given model using cross-validated predictions.
+
+    Parameters:
+    ----------
+    best_model (sklearn.base.BaseEstimator): The model to be evaluated.
+    X (pd.DataFrame or np.ndarray): The feature matrix.
+    y (pd.Series or np.ndarray): The target vector.
+
+    Returns:
+    ----------
+    dict: A dictionary containing the following metrics:
+        - 'roc_auc' (float): The ROC AUC score.
+        - 'ap' (float): The average precision score.
+        - 'precision' (float): The precision score.
+        - 'recall' (float): The recall score.
+        - 'f1_score' (float): The F1 score.
+    """
+    # Get cross-validated predictions and probabilities
+    y_pred_proba = cross_val_predict(best_model, X, y, cv=5, method="predict_proba")
+    y_pred = (y_pred_proba[:, 1] >= 0.5).astype(int)
+    y_proba = y_pred_proba[:, 1]
+
+    # Calculate metrics
+    roc_auc = roc_auc_score(y, y_proba)
+    ap = average_precision_score(y, y_proba)
+    precision_score_value = precision_score(y, y_pred)
+    recall_score_value = recall_score(y, y_pred)
+    f1_score_value = f1_score(y, y_pred)
+
+    metrics = {
+        "roc_auc": roc_auc,
+        "ap": ap,
+        "precision": precision_score_value,
+        "recall": recall_score_value,
+        "f1_score": f1_score_value,
+    }
+
+    return metrics
+
+
+def extract_uncertain_samples(
+    best_model, pool_X, clusters, n_extract_uncert_per_cluster=5, skip_certain=True
+):
+    """
+    Extract the top uncertain samples from the pool using Least Confidence Sampling.
+
+    Parameters:
+    ----------
+    best_model : Pipeline
+        The trained model used to predict probabilities.
+
+    pool_X : pd.DataFrame
+        The pool of unlabeled samples.
+
+    clusters : np.ndarray
+        Unique cluster identifiers.
+
+    n_extract_uncert_per_cluster : int, optional
+        Number of uncertain samples to extract per cluster. Default is 5.
+
+    skip_certain : bool, optional
+        If True, skip clusters where all samples are certain. Default is True.
+
+    Returns:
+    -------
+    pd.DataFrame
+        The DataFrame containing the top uncertain samples.
+    """
+    # Predict probabilities for the unlabeled pool
+    probs = best_model.predict_proba(pool_X.drop(columns=["cluster"]).values)
+
+    # Compute uncertainties using Least Confidence
+    uncertainties = 1 - np.max(probs, axis=1)
+    uncert_dict = dict(zip(pool_X.index, uncertainties))
+
+    # Extract items which the model is certain about
+    certain_dict = {k: v for k, v in uncert_dict.items() if v == 0}
+    certain_indices = list(certain_dict.keys())
+    X_certain = pool_X.loc[certain_indices]
+
+    # Filter out items with low uncertainty
+    if skip_certain:
+        uncert_dict = {k: v for k, v in uncert_dict.items() if v > 0.2}
+    else:
+        uncert_dict = {k: v for k, v in uncert_dict.items() if v != 0}
+
+    # Extract the top "n" most uncertain elements from each cluster
+    top_uncertain_indices = []
+    for cluster in clusters:
+        cluster_indices = pool_X.index[pool_X["cluster"] == cluster]
+        cluster_uncertainties = {
+            idx: uncert_dict[idx] for idx in cluster_indices if idx in uncert_dict
+        }
+
+        # No uncertainties in the cluster
+        if not cluster_uncertainties:
+            continue
+
+        # Not enough samples in the cluster
+        elif len(cluster_uncertainties) < n_extract_uncert_per_cluster:
+            top_indices = list(cluster_uncertainties.keys())
+
+        # Select the top highest values from cluster_uncertainties
+        else:
+            top_indices = sorted(
+                cluster_uncertainties,
+                key=cluster_uncertainties.get,
+                reverse=True,
+            )[:n_extract_uncert_per_cluster]
+
+        top_uncertain_indices.extend(top_indices)
+
+    # Extract the top uncertain samples from the pool
+    X_uncertain = pool_X.loc[top_uncertain_indices]
+
+    # Remove the new uncertain data from the pool dataset
+    pool_X = pool_X.drop(
+        index=[idx for idx in top_uncertain_indices if idx in pool_X.index]
+    )
+    pool_X = pool_X.drop(index=[idx for idx in certain_indices if idx in pool_X.index])
+
+    return X_certain, X_uncertain, pool_X

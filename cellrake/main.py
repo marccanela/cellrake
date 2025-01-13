@@ -22,7 +22,7 @@ from cellrake.training import active_learning, create_subset_df
 from cellrake.utils import build_project, crop
 
 
-def look_for_segmentation(project_folder, image_folder, threshold_rel):
+def look_for_segmentation(project_folder, image_folder, threshold_rel, watershed):
     """
     Check for existing segmentation results or perform segmentation on images.
 
@@ -77,7 +77,7 @@ def look_for_segmentation(project_folder, image_folder, threshold_rel):
     else:
         # Segment images to obtain two dictionaries: 'rois' and 'layers'
         try:
-            rois, layers = iterate_segmentation(image_folder, threshold_rel)
+            rois, layers = iterate_segmentation(image_folder, threshold_rel, watershed)
         except Exception as e:
             raise RuntimeError(f"Error during segmentation: {e}")
 
@@ -92,7 +92,10 @@ def look_for_segmentation(project_folder, image_folder, threshold_rel):
 
 
 def train(
-    image_folder: Path, threshold_rel: float, model_type: str = "svm"
+    image_folder: Path,
+    threshold_rel: float,
+    model_type: str = "svm",
+    watershed: bool = True,
 ) -> Union[Pipeline, SVC, RandomForestClassifier, LogisticRegression]:
     """
     This function trains a machine learning model using segmented images from the specified folder
@@ -106,8 +109,7 @@ def train(
         Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
         This should have a value between 0 and 1.
     model_type : str, optional
-        The type of model to train. Options are 'svm', 'rf' (Random Forest), or 'logreg' (Logistic Regression).
-        Default is 'svm'.
+        The type of model to train. Options are 'svm', 'rf', 'et', or 'logreg'.
 
     Returns:
     -------
@@ -115,9 +117,9 @@ def train(
         The best estimator found by the active learning.
     """
     # Validate model type
-    if model_type not in {"svm", "rf", "logreg"}:
+    if model_type not in {"svm", "rf", "logreg", "et"}:
         raise ValueError(
-            f"Invalid model type '{model_type}'. Choose from 'svm', 'rf', or 'logreg'."
+            f"Invalid model type '{model_type}'. Choose from 'svm', 'rf', 'et', or 'logreg'."
         )
 
     # Create the base project folder with "_training" suffix
@@ -127,20 +129,33 @@ def train(
     # Check if there is an existing segmentation
     try:
         rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel
+            project_folder, image_folder, threshold_rel, watershed
         )
     except Exception as e:
         raise RuntimeError(f"Error segmenting the images: {e}")
 
     # Extract features and labels from ROIs
-    try:
-        subset_df = create_subset_df(rois, layers)
-    except Exception as e:
-        raise RuntimeError(f"Error extracting features and labels: {e}")
+    subset_df_path = project_folder / "subset_df.pkl"
+    if subset_df_path.exists():
+        print(f"Existing subset dataframe detected.")
+        try:
+            with open(subset_df_path, "rb") as file:
+                subset_df = pkl.load(file)
+        except Exception as e:
+            raise RuntimeError(f"Error loading existing subset dataframe: {e}")
+    else:
+        try:
+            subset_df = create_subset_df(rois, layers)
+            with open(subset_df_path, "wb") as file:
+                pkl.dump(subset_df, file)
+        except Exception as e:
+            raise RuntimeError(f"Error extracting features and labels: {e}")
 
     # Perform active learning
     try:
-        model, performance_df = active_learning(subset_df, rois, layers, model_type)
+        model, performance_df_train, performance_df_validation = active_learning(
+            subset_df, rois, layers, model_type
+        )
     except Exception as e:
         raise RuntimeError(f"Error during active learning: {e}")
 
@@ -155,8 +170,11 @@ def train(
 
     # Save the metrics
     try:
-        performance_df.to_csv(
+        performance_df_train.to_csv(
             project_folder / "training_performance_metrics.csv", index=False
+        )
+        performance_df_validation.to_csv(
+            project_folder / "validation_performance_metrics.csv", index=False
         )
     except Exception as e:
         raise RuntimeError(f"Error exporting training performance metrics: {e}")
@@ -165,7 +183,11 @@ def train(
 
 
 def analyze(
-    image_folder: Path, model: BaseEstimator, threshold_rel: float, cmap: str = "Reds"
+    image_folder: Path,
+    model: BaseEstimator,
+    threshold_rel: float,
+    cmap: str = "Reds",
+    watershed: bool = True,
 ) -> None:
     """
     This function processes TIFF images located in the `image_folder` by:
@@ -205,7 +227,7 @@ def analyze(
     # Check if there is an existing segmentation
     try:
         rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel
+            project_folder, image_folder, threshold_rel, watershed
         )
     except Exception as e:
         raise RuntimeError(f"Error segmenting the images: {e}")
