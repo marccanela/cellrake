@@ -556,6 +556,10 @@ def balance_classes(labelled_Xy: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     class_1_Xy = labelled_Xy[labelled_Xy["label_column"] == 1]
     min_class_size = min(len(class_0_Xy), len(class_1_Xy))
 
+    if min_class_size == 0:
+        # Return empty balanced set and the original dataframe as excluded
+        return pd.DataFrame(columns=labelled_Xy.columns), labelled_Xy
+
     # Reduce both classes to the minimum class size
     class_0_index = class_0_Xy.sample(n=min_class_size, random_state=42).index
     class_1_index = class_1_Xy.sample(n=min_class_size, random_state=42).index
