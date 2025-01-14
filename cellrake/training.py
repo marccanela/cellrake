@@ -384,6 +384,9 @@ def active_learning(
         iteration += 1  # Increment iteration count
         print(f"Iteration {iteration}")
 
+        if len(balanced_Xy) > 1000:
+            balanced_Xy = balanced_Xy.sample(n=1000, random_state=42)
+
         X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
         y_labeled = balanced_Xy["label_column"].astype(int)
 
