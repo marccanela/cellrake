@@ -359,6 +359,8 @@ def active_learning(
     labelled_Xy_validation = pd.concat(
         [labelled_Xy_validation, excluded_Xy], ignore_index=True
     )
+    if len(labelled_Xy_validation) > 1000:
+        labelled_Xy_validation = labelled_Xy_validation.sample(n=1000, random_state=42)
     X_validation = labelled_Xy_validation.drop(columns=["label_column", "cluster"])
     y_validation = labelled_Xy_validation["label_column"].astype(int)
 
