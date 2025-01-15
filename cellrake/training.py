@@ -319,33 +319,60 @@ def active_learning(
         labelled_X = pd.concat([labelled_X, exploratory_df], ignore_index=True)
         labelled_y = pd.concat([labelled_y, exploratory_df_labeled], ignore_index=True)
 
-    # Balance train dataset
     labelled_y = labelled_y.astype(int)
     labelled_Xy = pd.concat([labelled_X, labelled_y], axis=1)
-    balanced_Xy, _ = balance_classes(labelled_Xy)
 
-    # Prepare datasets
+    # Pre-active learning loop (1)
+    balanced_Xy, _ = balance_classes(labelled_Xy)
     X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
     y_labeled = balanced_Xy["label_column"].astype(int)
-
-    # Pre-active learning loop
     initial_model = train_model(X_labeled.values, y_labeled.values, model_type)
     X_certain, X_uncertain, pool_X = extract_uncertain_samples(
         initial_model, pool_X, clusters, 10, skip_certain=False
     )
 
+    # Return certains to the pool
     if not X_certain.empty:
-        y_certain = initial_model.predict(X_certain.drop(columns=["cluster"]).values)
-        y_certain_df = pd.DataFrame(
-            y_certain, index=X_certain.index, columns=["label_column"]
-        )
-        certain_Xy = pd.concat([X_certain, y_certain_df], axis=1)
-        labelled_Xy = pd.concat([labelled_Xy, certain_Xy], ignore_index=True)
+        pool_X = pd.concat([pool_X, X_certain], ignore_index=True)
 
     y_uncertain = manual_labeling(X_uncertain, rois, layers)
     uncertain_Xy = pd.concat([X_uncertain, y_uncertain], axis=1)
     labelled_Xy = pd.concat([labelled_Xy, uncertain_Xy], ignore_index=True)
     labelled_Xy["label_column"] = labelled_Xy["label_column"].astype(int)
+
+    # Pre-active learning loop (2)
+    balanced_Xy, _ = balance_classes(labelled_Xy)
+    X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
+    y_labeled = balanced_Xy["label_column"].astype(int)
+    second_model = train_model(X_labeled.values, y_labeled.values, model_type)
+    X_certain, X_uncertain, pool_X = extract_uncertain_samples(
+        second_model, pool_X, clusters, 10, skip_certain=False
+    )
+
+    # Combine positive certains in the data (pseudo-labelling)
+    if not X_certain.empty:
+        y_certain = second_model.predict(X_certain.drop(columns=["cluster"]).values)
+        y_certain_df = pd.DataFrame(
+            y_certain, index=X_certain.index, columns=["label_column"]
+        )
+
+        # Return negatives to the pool
+        index_negatives = y_certain_df[y_certain_df.label_column == 0].index
+        X_certain_negatives = X_certain.loc[X_certain.index.isin(index_negatives)]
+        pool_X = pd.concat([pool_X, X_certain_negatives], ignore_index=True)
+
+        # Select only positive predictions (minoritary ones)
+        index_positives = y_certain_df[y_certain_df.label_column == 1].index
+        X_certain_positives = X_certain.loc[X_certain.index.isin(index_positives)]
+        y_certain_positive_df = y_certain_df[y_certain_df.label_column == 1]
+        certain_positive_Xy = pd.concat(
+            [X_certain_positives, y_certain_positive_df], axis=1
+        )
+        labelled_Xy = pd.concat([labelled_Xy, certain_positive_Xy], ignore_index=True)
+
+    # Return uncertains to the pool
+    if not X_uncertain.empty:
+        pool_X = pd.concat([pool_X, X_uncertain], ignore_index=True)
 
     # Split the labeled data into training and testing sets (80-20 split)
     labelled_Xy_train, labelled_Xy_validation = train_test_split(
@@ -355,12 +382,17 @@ def active_learning(
     # Balance the newly labeled dataset and prepare for the next iteration
     balanced_Xy, excluded_Xy = balance_classes(labelled_Xy_train)
 
+    # Select max_dataset_size (set 0 to ignore)
+    max_dataset_size = 2000
+
     # Prepare the validation set
     labelled_Xy_validation = pd.concat(
         [labelled_Xy_validation, excluded_Xy], ignore_index=True
     )
-    if len(labelled_Xy_validation) > 1000:
-        labelled_Xy_validation = labelled_Xy_validation.sample(n=1000, random_state=42)
+    if (len(labelled_Xy_validation) > max_dataset_size) and (max_dataset_size != 0):
+        labelled_Xy_validation = labelled_Xy_validation.sample(
+            n=max_dataset_size, random_state=42
+        )
     X_validation = labelled_Xy_validation.drop(columns=["label_column", "cluster"])
     y_validation = labelled_Xy_validation["label_column"].astype(int)
 
@@ -384,8 +416,8 @@ def active_learning(
         iteration += 1  # Increment iteration count
         print(f"Iteration {iteration}")
 
-        if len(balanced_Xy) > 1000:
-            balanced_Xy = balanced_Xy.sample(n=1000, random_state=42)
+        if (len(balanced_Xy) > max_dataset_size) and (max_dataset_size != 0):
+            balanced_Xy = balanced_Xy.sample(n=max_dataset_size, random_state=42)
 
         X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
         y_labeled = balanced_Xy["label_column"].astype(int)

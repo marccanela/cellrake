@@ -861,38 +861,44 @@ def extract_uncertain_samples(
         uncert_dict = {k: v for k, v in uncert_dict.items() if v != 0}
 
     # Extract the top "n" most uncertain elements from each cluster
-    top_uncertain_indices = []
-    for cluster in clusters:
-        cluster_indices = pool_X.index[pool_X["cluster"] == cluster]
-        cluster_uncertainties = {
-            idx: uncert_dict[idx] for idx in cluster_indices if idx in uncert_dict
-        }
+    if n_extract_uncert_per_cluster != 0:
+        top_uncertain_indices = []
+        for cluster in clusters:
+            cluster_indices = pool_X.index[pool_X["cluster"] == cluster]
+            cluster_uncertainties = {
+                idx: uncert_dict[idx] for idx in cluster_indices if idx in uncert_dict
+            }
 
-        # No uncertainties in the cluster
-        if not cluster_uncertainties:
-            continue
+            # No uncertainties in the cluster
+            if not cluster_uncertainties:
+                continue
 
-        # Not enough samples in the cluster
-        elif len(cluster_uncertainties) < n_extract_uncert_per_cluster:
-            top_indices = list(cluster_uncertainties.keys())
+            # Not enough samples in the cluster
+            elif len(cluster_uncertainties) < n_extract_uncert_per_cluster:
+                top_indices = list(cluster_uncertainties.keys())
 
-        # Select the top highest values from cluster_uncertainties
-        else:
-            top_indices = sorted(
-                cluster_uncertainties,
-                key=cluster_uncertainties.get,
-                reverse=True,
-            )[:n_extract_uncert_per_cluster]
+            # Select the top highest values from cluster_uncertainties
+            else:
+                top_indices = sorted(
+                    cluster_uncertainties,
+                    key=cluster_uncertainties.get,
+                    reverse=True,
+                )[:n_extract_uncert_per_cluster]
 
-        top_uncertain_indices.extend(top_indices)
+            top_uncertain_indices.extend(top_indices)
 
-    # Extract the top uncertain samples from the pool
-    X_uncertain = pool_X.loc[top_uncertain_indices]
+        # Extract the top uncertain samples from the pool
+        X_uncertain = pool_X.loc[top_uncertain_indices]
 
-    # Remove the new uncertain data from the pool dataset
-    pool_X = pool_X.drop(
-        index=[idx for idx in top_uncertain_indices if idx in pool_X.index]
-    )
+        # Remove the new uncertain data from the pool dataset
+        pool_X = pool_X.drop(
+            index=[idx for idx in top_uncertain_indices if idx in pool_X.index]
+        )
+
+    else:
+        X_uncertain = None
+
+    # Remove certains from the pool
     pool_X = pool_X.drop(index=[idx for idx in certain_indices if idx in pool_X.index])
 
     return X_certain, X_uncertain, pool_X
