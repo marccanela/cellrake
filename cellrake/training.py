@@ -333,7 +333,7 @@ def active_learning(
 
     # Return certains to the pool
     if not X_certain.empty:
-        pool_X = pd.concat([pool_X, X_certain], ignore_index=True)
+        pool_X = pd.concat([pool_X, X_certain])
 
     y_uncertain = manual_labeling(X_uncertain, rois, layers)
     uncertain_Xy = pd.concat([X_uncertain, y_uncertain], axis=1)
@@ -359,7 +359,7 @@ def active_learning(
         # Return negatives to the pool
         index_negatives = y_certain_df[y_certain_df.label_column == 0].index
         X_certain_negatives = X_certain.loc[X_certain.index.isin(index_negatives)]
-        pool_X = pd.concat([pool_X, X_certain_negatives], ignore_index=True)
+        pool_X = pd.concat([pool_X, X_certain_negatives])
 
         # Select only positive predictions (minoritary ones)
         index_positives = y_certain_df[y_certain_df.label_column == 1].index
@@ -372,7 +372,7 @@ def active_learning(
 
     # Return uncertains to the pool
     if not X_uncertain.empty:
-        pool_X = pd.concat([pool_X, X_uncertain], ignore_index=True)
+        pool_X = pd.concat([pool_X, X_uncertain])
 
     # Split the labeled data into training and testing sets (80-20 split)
     labelled_Xy_train, labelled_Xy_validation = train_test_split(
