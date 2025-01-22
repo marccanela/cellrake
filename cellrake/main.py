@@ -18,11 +18,11 @@ from tqdm import tqdm
 
 from cellrake.predicting import iterate_predicting
 from cellrake.segmentation import iterate_segmentation
-from cellrake.training import active_learning, create_subset_df
+from cellrake.training import create_subset_df, train_classifier
 from cellrake.utils import build_project, crop
 
 
-def look_for_segmentation(project_folder, image_folder, threshold_rel, watershed):
+def look_for_segmentation(project_folder, image_folder, threshold_rel):
     """
     Check for existing segmentation results or perform segmentation on images.
 
@@ -76,8 +76,9 @@ def look_for_segmentation(project_folder, image_folder, threshold_rel, watershed
 
     else:
         # Segment images to obtain two dictionaries: 'rois' and 'layers'
+        print("No existing segmentation found. Generating a new one...")
         try:
-            rois, layers = iterate_segmentation(image_folder, threshold_rel, watershed)
+            rois, layers = iterate_segmentation(image_folder, threshold_rel)
         except Exception as e:
             raise RuntimeError(f"Error during segmentation: {e}")
 
@@ -95,7 +96,8 @@ def train(
     image_folder: Path,
     threshold_rel: float,
     model_type: str = "svm",
-    watershed: bool = True,
+    clusters: int = 10,
+    samples: int = 10,
 ) -> Union[Pipeline, SVC, RandomForestClassifier, LogisticRegression]:
     """
     This function trains a machine learning model using segmented images from the specified folder
@@ -129,7 +131,7 @@ def train(
     # Check if there is an existing segmentation
     try:
         rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel, watershed
+            project_folder, image_folder, threshold_rel
         )
     except Exception as e:
         raise RuntimeError(f"Error segmenting the images: {e}")
@@ -145,7 +147,7 @@ def train(
             raise RuntimeError(f"Error loading existing subset dataframe: {e}")
     else:
         try:
-            subset_df = create_subset_df(rois, layers)
+            subset_df = create_subset_df(rois, layers, clusters)
             with open(subset_df_path, "wb") as file:
                 pkl.dump(subset_df, file)
         except Exception as e:
@@ -153,8 +155,8 @@ def train(
 
     # Perform active learning
     try:
-        model, performance_df_train, performance_df_validation = active_learning(
-            subset_df, rois, layers, model_type
+        best_model, metrics_combined = train_classifier(
+            subset_df, rois, layers, samples, model_type, project_folder
         )
     except Exception as e:
         raise RuntimeError(f"Error during active learning: {e}")
@@ -164,30 +166,21 @@ def train(
         with open(
             project_folder / f"{image_folder.stem}_model_{model_type}.pkl", "wb"
         ) as file:
-            pkl.dump(model, file)
+            pkl.dump(best_model, file)
     except Exception as e:
         raise RuntimeError(f"Error saving the model: {e}")
 
     # Save the metrics
     try:
-        performance_df_train.to_csv(
-            project_folder / "training_performance_metrics.csv", index=False
-        )
-        performance_df_validation.to_csv(
-            project_folder / "validation_performance_metrics.csv", index=False
-        )
+        metrics_combined.to_csv(project_folder / "performance_metrics.csv", index=False)
     except Exception as e:
         raise RuntimeError(f"Error exporting training performance metrics: {e}")
 
-    return model
+    return best_model
 
 
 def analyze(
-    image_folder: Path,
-    model: BaseEstimator,
-    threshold_rel: float,
-    cmap: str = "Reds",
-    watershed: bool = True,
+    image_folder: Path, model: BaseEstimator, threshold_rel: float, cmap: str = "Reds"
 ) -> None:
     """
     This function processes TIFF images located in the `image_folder` by:
@@ -227,7 +220,7 @@ def analyze(
     # Check if there is an existing segmentation
     try:
         rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel, watershed
+            project_folder, image_folder, threshold_rel
         )
     except Exception as e:
         raise RuntimeError(f"Error segmenting the images: {e}")

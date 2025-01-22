@@ -2,7 +2,6 @@
 @author: Marc Canela
 """
 
-import pickle as pkl
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -27,6 +26,7 @@ from sklearn.model_selection import RandomizedSearchCV, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from tqdm import tqdm
 
 
 def export_data(data, project_folder, file_name):
@@ -679,7 +679,7 @@ def train_rf(
         cv=5,
         random_state=42,
         n_jobs=-1,
-        verbose=0,
+        verbose=3,  # Verbosity level for detailed output
         error_score="raise",
     )
 
@@ -733,7 +733,7 @@ def train_logreg(
         cv=5,
         random_state=42,
         n_jobs=-1,
-        verbose=0,
+        verbose=3,  # Verbosity level for detailed output
         error_score="raise",
     )
 
