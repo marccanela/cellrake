@@ -81,51 +81,54 @@ def iterate_segmentation(
         - `rois`: A dictionary where keys are image filenames and values are dictionaries of ROI data.
         - `layers`: A dictionary where keys are image filenames and values are the corresponding segmented layers as NumPy arrays.
     """
+    rois = {}
+    layers = {}
 
     # Iterate over each .tif file and pre-process the arrays
-    print("Step 1 out of 4: Image preprocessing.")
-    layers = {}
-    combined_arrays = {}
+    # print("Step 1 out of 2: Image preprocessing.")
+    # combined_arrays = {}
     for tif_path in tqdm(
         list(image_folder.glob("*.tif")), desc="Preprocessing images", unit="image"
     ):
         tag = tif_path.stem
         combined_array, layer = segment_image(tif_path, threshold_rel)
-        combined_arrays[tag] = combined_array
+        # combined_arrays[tag] = combined_array
         layers[tag] = layer
 
+        labels = measure.label(combined_array)
+        polygons = extract_polygons(labels)
+        rois[tag] = convert_to_roi(polygons, layer)
+
     # Apply watershed
-    print("Step 2 out of 4: Selection of images to watershed.")
-    divide = {}
-    non_divide = {}
-    for tag, combined_array in tqdm(
-        combined_arrays.items(), desc="Processing images", unit="image"
-    ):
-        global_user_input = global_watershed(layers[tag])
-        if global_user_input == "n":
-            non_divide[tag] = combined_array
-        elif global_user_input == "y":
-            divide[tag] = combined_array
+    # print("Step 2 out of 4: Selection of images to watershed.")
+    # divide = {}
+    # non_divide = {}
+    # for tag, combined_array in tqdm(
+    #     combined_arrays.items(), desc="Processing images", unit="image"
+    # ):
+    #     global_user_input = global_watershed(layers[tag])
+    #     if global_user_input == "n":
+    #         non_divide[tag] = combined_array
+    #     elif global_user_input == "y":
+    #         divide[tag] = combined_array
 
-    rois = {}
+    # if len(divide) != 0:
+    #     print("Step 3 out of 4: Manual watershed.")
+    #     for tag, combined_array in tqdm(
+    #         divide.items(), desc="Processing images", unit="image"
+    #     ):
+    #         watershed_array = preprocess_watershed(combined_array, layers[tag])
+    #         polygons = extract_polygons(watershed_array)
+    #         rois[tag] = convert_to_roi(polygons, layers[tag])
 
-    if len(divide) != 0:
-        print("Step 3 out of 4: Manual watershed.")
-        for tag, combined_array in tqdm(
-            divide.items(), desc="Processing images", unit="image"
-        ):
-            watershed_array = preprocess_watershed(combined_array, layers[tag])
-            polygons = extract_polygons(watershed_array)
-            rois[tag] = convert_to_roi(polygons, layers[tag])
-
-    if len(non_divide) != 0:
-        print("Step 4 out of 4: Automatic watershed.")
-        for tag, combined_array in tqdm(
-            non_divide.items(), desc="Processing images", unit="image"
-        ):
-            labels = measure.label(combined_array)
-            polygons = extract_polygons(labels)
-            rois[tag] = convert_to_roi(polygons, layers[tag])
+    # if len(non_divide) != 0:
+    #     print("Step 4 out of 4: Automatic watershed.")
+    #     for tag, combined_array in tqdm(
+    #         non_divide.items(), desc="Processing images", unit="image"
+    #     ):
+    #         labels = measure.label(combined_array)
+    #         polygons = extract_polygons(labels)
+    #         rois[tag] = convert_to_roi(polygons, layers[tag])
 
     return rois, layers
 

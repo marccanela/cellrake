@@ -14,7 +14,7 @@ from scipy.stats import entropy
 from sklearn.base import clone
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_predict, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.semi_supervised import LabelSpreading
@@ -243,7 +243,7 @@ def label_speading(subset_df, rois, layers, samples):
     y_combined = np.concatenate([y_resampled, [-1] * len(X_pool)])
 
     # Initialize and fit the LabelSpreading model
-    ls = LabelSpreading(kernel="rbf")
+    ls = LabelSpreading(kernel="knn")
     ls.fit(X_combined, y_combined)
 
     # Separate back into labeled and pool data
@@ -276,7 +276,7 @@ def label_speading(subset_df, rois, layers, samples):
     return total_df
 
 
-def plot_pca(total_df):
+def plot_pca(total_df, project_folder):
 
     # Create colormaps
     pastel1_colors = ["#fbb4ae", "#b3cde3"]  # First two colors of Pastel1
@@ -312,17 +312,6 @@ def plot_pca(total_df):
     # Plot the data points
     plt.figure()
 
-    # Positive pseudo-labeled
-    mask_positive_pseudo = label_1 & correct_prob & confident & ~manual
-    X_positive_pseudo = X[mask_positive_pseudo]
-    plt.scatter(
-        X_positive_pseudo[:, 0],
-        X_positive_pseudo[:, 1],
-        color=pastel1_colors[0],
-        marker="x",
-        label="Positive Pseudo-labeled",
-    )
-
     # Negative pseudo-labeled
     mask_negative_pseudo = label_0 & correct_prob & confident & ~manual
     X_negative_pseudo = X[mask_negative_pseudo]
@@ -334,15 +323,38 @@ def plot_pca(total_df):
         label="Negative Pseudo-labeled",
     )
 
-    # Uncertain
-    mask_uncertain = ~correct_prob | ~confident
-    X_uncertain = X[mask_uncertain]
+    # Positive pseudo-labeled
+    mask_positive_pseudo = label_1 & correct_prob & confident & ~manual
+    X_positive_pseudo = X[mask_positive_pseudo]
     plt.scatter(
-        X_uncertain[:, 0],
-        X_uncertain[:, 1],
-        color="grey",
+        X_positive_pseudo[:, 0],
+        X_positive_pseudo[:, 1],
+        color=pastel1_colors[0],
         marker="x",
-        label="Uncertain Pseudo-labeled",
+        label="Positive Pseudo-labeled",
+    )
+
+    # Uncertain
+    # mask_uncertain = ~correct_prob | ~confident
+    # X_uncertain = X[mask_uncertain]
+    # plt.scatter(
+    #     X_uncertain[:, 0],
+    #     X_uncertain[:, 1],
+    #     color="grey",
+    #     marker="x",
+    #     label="Uncertain Pseudo-labeled",
+    # )
+
+    # Negative labeled
+    mask_negative_manual = label_0 & manual
+    X_negative_manual = X[mask_negative_manual]
+    plt.scatter(
+        X_negative_manual[:, 0],
+        X_negative_manual[:, 1],
+        color=set1_colors[1],
+        edgecolors="k",
+        marker="o",
+        label="Negative Labeled",
     )
 
     # Positive labeled
@@ -357,27 +369,20 @@ def plot_pca(total_df):
         label="Positive Labeled",
     )
 
-    # Negative labeled
-    mask_negative_manual = label_0 & manual
-    X_negative_manual = X[mask_negative_manual]
-    plt.scatter(
-        X_negative_manual[:, 0],
-        X_negative_manual[:, 1],
-        color=set1_colors[1],
-        edgecolors="k",
-        marker="o",
-        label="Negative Labeled",
-    )
-
     # Add legend and title
     plt.legend()
     plt.title("2D PCA Visualization of Labeled and Pseudo-labeled Data")
     plt.xlabel(f"PC1 ({most_contributing_features[0]})")
     plt.ylabel(f"PC2 ({most_contributing_features[1]})")
-    plt.show()
+
+    # Save the plot as a PNG file
+    output_path = f"{project_folder}/pca_label_spreading.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+    # plt.show()
 
 
-def plot_decision_boundary(total_df, best_model, X, y):
+def plot_pca_decision_boundary(total_df, best_model, X, y, project_folder):
 
     # Reduce to 2D using PCA
     pipeline = Pipeline(
@@ -424,17 +429,6 @@ def plot_decision_boundary(total_df, best_model, X, y):
     # Boundary
     plt.contourf(xx, yy, Z, alpha=0.8, cmap="coolwarm")
 
-    # Positive labeled
-    X_positive_manual = X_2d[label_1]
-    plt.scatter(
-        X_positive_manual[:, 0],
-        X_positive_manual[:, 1],
-        color=set1_colors[0],
-        edgecolors="k",
-        marker="o",
-        label="Positive Labeled",
-    )
-
     # Negative labeled
     X_negative_manual = X_2d[label_0]
     plt.scatter(
@@ -446,12 +440,149 @@ def plot_decision_boundary(total_df, best_model, X, y):
         label="Negative Labeled",
     )
 
+    # Positive labeled
+    X_positive_manual = X_2d[label_1]
+    plt.scatter(
+        X_positive_manual[:, 0],
+        X_positive_manual[:, 1],
+        color=set1_colors[0],
+        edgecolors="k",
+        marker="o",
+        label="Positive Labeled",
+    )
+
     # Add legend and title
     plt.legend()
     plt.title("2D PCA Visualization of Decision Boundary")
     plt.xlabel(f"PC1 ({most_contributing_features[0]})")
     plt.ylabel(f"PC2 ({most_contributing_features[1]})")
-    plt.show()
+
+    # Save the plot as a PNG file
+    output_path = f"{project_folder}/pca_decision_boundary.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+    # plt.show()
+
+
+def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder):
+
+    # Reduce to 2D using PCA
+    pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=2, random_state=42)),
+        ]
+    )
+    pipeline.fit(X)
+    X_2d_train = pipeline.transform(X_train)
+    X_2d_test = pipeline.transform(X_test)
+
+    # Create colormaps
+    set1_colors = ["#e41a1c", "#377eb8"]  # First two colors of Set1
+
+    # Rotated loading scores
+    loading_scores = pipeline.named_steps["pca"].components_
+    max_contributing_features = np.argmax(np.abs(loading_scores), axis=1)
+    feature_names = total_df.drop(
+        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+    ).columns
+    most_contributing_features = [feature_names[i] for i in max_contributing_features]
+
+    # Build masks
+    label_0_train = y_train == 0
+    label_1_train = y_train == 1
+    label_0_test = y_test == 0
+    label_1_test = y_test == 1
+
+    # Negative Test
+    X_2d_test_0 = X_2d_test[label_0_test]
+    plt.scatter(
+        X_2d_test_0[:, 0],
+        X_2d_test_0[:, 1],
+        color=set1_colors[1],
+        marker="x",
+        label="Negative Test",
+    )
+
+    # Positive Test
+    X_2d_test_1 = X_2d_test[label_1_test]
+    plt.scatter(
+        X_2d_test_1[:, 0],
+        X_2d_test_1[:, 1],
+        color=set1_colors[0],
+        marker="x",
+        label="Positive Test",
+    )
+
+    # Negative Train
+    X_2d_train_0 = X_2d_train[label_0_train]
+    plt.scatter(
+        X_2d_train_0[:, 0],
+        X_2d_train_0[:, 1],
+        color=set1_colors[1],
+        edgecolors="k",
+        marker="o",
+        label="Negative Train",
+    )
+
+    # Positive Train
+    X_2d_train_1 = X_2d_train[label_1_train]
+    plt.scatter(
+        X_2d_train_1[:, 0],
+        X_2d_train_1[:, 1],
+        color=set1_colors[0],
+        edgecolors="k",
+        marker="o",
+        label="Positive Train",
+    )
+
+    # Add legend and title
+    plt.legend()
+    plt.title("2D PCA Visualization of Train-Test")
+    plt.xlabel(f"PC1 ({most_contributing_features[0]})")
+    plt.ylabel(f"PC2 ({most_contributing_features[1]})")
+
+    # Save the plot as a PNG file
+    output_path = f"{project_folder}/pca_train_test.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+    # plt.show()
+
+
+def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples, name):
+
+    label_speading_path = project_folder / name
+
+    if label_speading_path.exists():
+        print("Existing pseudo-labeled dataset detected.")
+        user_input = ""  # Initialize the variable to avoid unreferenced errors
+        while user_input not in ["y", "n"]:
+            user_input = input("Do you want to load it? (y/n): ").strip().lower()
+            if user_input == "y":
+                try:
+                    with open(label_speading_path, "rb") as file:
+                        total_df = pkl.load(file)
+                    print("Successfully loaded the existing pseudo-labeled dataset.")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Error loading existing pseudo-labeled dataset: {e}"
+                    )
+                return total_df
+            elif user_input == "n":
+                print("Regenerating the pseudo-labeled dataset...")
+                break
+            else:
+                print("Invalid input. Please enter 'y' for yes or 'n' for no.")
+
+    else:
+        print("No existing pseudo-labeled dataset found. Generating a new one...")
+
+    total_df = label_speading(subset_df, rois, layers, samples)
+    plot_pca(total_df, project_folder)
+    with open(label_speading_path, "wb") as file:
+        pkl.dump(total_df, file)
+    print("Pseudo-labeled dataset generated and saved.")
+    return total_df
 
 
 def train_classifier(
@@ -494,55 +625,55 @@ def train_classifier(
         The best estimator found by active learning and a DataFrame with performance metrics.
     """
     # Label spreading
-    label_speading_path = project_folder / "pseudo_labels.pkl"
-    if label_speading_path.exists():
-        print(f"Existing pseudo-labeled dataset detected.")
-        user_input = ""  # Initialize the variable to avoid unreferenced errors
-        while user_input not in ["y", "n"]:
-            user_input = input("Do you want to load it? (y/n): ").strip().lower()
-            if user_input == "y":
-                try:
-                    with open(label_speading_path, "rb") as file:
-                        total_df = pkl.load(file)
-                    print("Successfully loaded the existing pseudo-labeled dataset.")
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Error loading existing pseudo-labeled dataset: {e}"
-                    )
-            elif user_input == "n":
-                print("Regenerating the pseudo-labeled dataset...")
-                total_df = label_speading(subset_df, rois, layers, samples)
-                plot_pca(total_df)
-                with open(label_speading_path, "wb") as file:
-                    pkl.dump(total_df, file)
-            else:
-                print("Invalid input. Please enter 'y' for yes or 'n' for no.")
-    else:
-        print("No existing pseudo-labeled dataset found. Generating a new one...")
-        total_df = label_speading(subset_df, rois, layers, samples)
-        plot_pca(total_df)
-        with open(label_speading_path, "wb") as file:
-            pkl.dump(total_df, file)
-
-    print(f"Proceeding with training the {model_type} classifier...")
+    total_df = handle_pseudo_labels(
+        project_folder, subset_df, rois, layers, samples, "pseudo_labels.pkl"
+    )
 
     # Prepare features and labels
+    print("Proceeding with the preliminar model...")
     correct_prob = total_df.is_zero_prob == False
-    confident = total_df.myentropy < 0.2
+    confident = total_df.myentropy < 0.025
     mask = correct_prob & confident
 
     raw_features = total_df.drop(
         columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
     ).values
     raw_labels = total_df.labels.values.astype(int)
+    raw_clusters = total_df.cluster.values.astype(int)
 
     X = raw_features[mask]
     y = raw_labels[mask]
+    clusters = raw_clusters[mask]
 
     # Split into train/test
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    length = len(X)
+
+    if length > 2000:
+        train_size = 1000 / length
+
+        # Initial split with proportional stratification
+        X_train, X_temp, y_train, y_temp, _, clusters_temp = train_test_split(
+            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
+        )
+
+        # Adjust the remaining temp data to ensure exactly 1000 samples for testing
+        test_size_adjusted = 1000 / len(X_temp)
+        X_test, _, y_test, _, _, _ = train_test_split(
+            X_temp,
+            y_temp,
+            clusters_temp,
+            train_size=test_size_adjusted,
+            random_state=42,
+            stratify=clusters_temp,
+        )
+    else:
+        # Standard 80-20 split
+        train_size = 0.8
+        X_train, X_test, y_train, y_test, _, _ = train_test_split(
+            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
+        )
+
+    plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder)
 
     # Train classifier
     best_model = train_model(X_train, y_train, model_type)
@@ -555,6 +686,6 @@ def train_classifier(
     print(metrics_combined)
 
     # Plot decision boundary
-    plot_decision_boundary(total_df, best_model, X, y)
+    # plot_pca_decision_boundary(total_df, best_model_1, X, y, project_folder)
 
     return best_model, metrics_combined

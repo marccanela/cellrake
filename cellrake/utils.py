@@ -602,22 +602,26 @@ def train_svm(
     pipeline_steps = [
         ("scaler", StandardScaler()),
         ("pca", PCA(n_components=0.95, random_state=42)),
-        ("svm", SVC(kernel="rbf", probability=True, random_state=42)),
+        (
+            "svm",
+            SVC(
+                kernel="rbf", probability=True, class_weight="balanced", random_state=42
+            ),
+        ),
     ]
     pipeline = Pipeline(pipeline_steps)
 
     # Define the distribution of hyperparameters for RandomizedSearchCV
     param_dist = {
         "svm__C": uniform(1, 100),  # Regularization parameter
-        "svm__gamma": uniform(0.001, 0.1),  # Kernel coefficient for RBF kernel
     }
 
     # Perform randomized search with cross-validation
     random_search = RandomizedSearchCV(
         pipeline,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
         verbose=0,
@@ -625,6 +629,45 @@ def train_svm(
     )
 
     # Fit the model to the training data
+    random_search.fit(X_train, y_train)
+
+    # Retrieve the best model from the random search
+    best_model = random_search.best_estimator_
+
+    return best_model
+
+
+def train_unbalanced(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
+
+    class_weight = {0: 1, 1: 10}
+    rf = ExtraTreesClassifier(class_weight=class_weight, random_state=42)
+
+    # Define the hyperparameter grid
+    param_dist = {
+        "n_estimators": [int(x) for x in np.linspace(start=50, stop=500, num=10)],
+        "max_features": ["sqrt", "log2", None],
+        "max_depth": [int(x) for x in np.linspace(10, 100, num=10)] + [None],
+        "min_samples_split": [2, 5, 10, 15, 20],
+        "min_samples_leaf": [1, 2, 4, 8, 10],
+        "bootstrap": [True, False],
+        "criterion": ["gini", "entropy"],
+    }
+
+    # Set up RandomizedSearchCV
+    random_search = RandomizedSearchCV(
+        rf,
+        param_dist,
+        n_iter=50,
+        cv=3,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,  # Verbosity level for detailed output
+        error_score="raise",
+    )
+
+    # Fit RandomizedSearchCV to the data
     random_search.fit(X_train, y_train)
 
     # Retrieve the best model from the random search
@@ -656,9 +699,9 @@ def train_rf(
     """
 
     if model_type == "et":
-        rf = ExtraTreesClassifier(random_state=42)
+        rf = ExtraTreesClassifier(class_weight="balanced", random_state=42)
     else:
-        rf = RandomForestClassifier(random_state=42)
+        rf = RandomForestClassifier(class_weight="balanced", random_state=42)
 
     # Define the hyperparameter grid
     param_dist = {
@@ -675,11 +718,11 @@ def train_rf(
     random_search = RandomizedSearchCV(
         rf,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
-        verbose=3,  # Verbosity level for detailed output
+        verbose=0,  # Verbosity level for detailed output
         error_score="raise",
     )
 
@@ -716,7 +759,7 @@ def train_logreg(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=0.95, random_state=42)),
-            ("log_reg", LogisticRegression(random_state=42)),
+            ("log_reg", LogisticRegression(class_weight="balanced", random_state=42)),
         ]
     )
 
@@ -729,11 +772,11 @@ def train_logreg(
     random_search = RandomizedSearchCV(
         pipeline,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
-        verbose=3,  # Verbosity level for detailed output
+        verbose=0,  # Verbosity level for detailed output
         error_score="raise",
     )
 
@@ -792,7 +835,7 @@ def evaluate_model(best_model, X, y):
         - 'f1_score' (float): The F1 score.
     """
     # Get cross-validated predictions and probabilities
-    y_pred_proba = cross_val_predict(best_model, X, y, cv=5, method="predict_proba")
+    y_pred_proba = cross_val_predict(best_model, X, y, cv=3, method="predict_proba")
     y_pred = (y_pred_proba[:, 1] >= 0.5).astype(int)
     y_proba = y_pred_proba[:, 1]
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Union
 
 import matplotlib.pyplot as plt
+import napari
 import numpy as np
 from PIL import Image
 from sklearn.base import BaseEstimator
@@ -95,7 +96,7 @@ def look_for_segmentation(project_folder, image_folder, threshold_rel):
 def train(
     image_folder: Path,
     threshold_rel: float,
-    model_type: str = "svm",
+    model_type: str = "rf",
     clusters: int = 10,
     samples: int = 10,
 ) -> Union[Pipeline, SVC, RandomForestClassifier, LogisticRegression]:
@@ -172,7 +173,9 @@ def train(
 
     # Save the metrics
     try:
-        metrics_combined.to_csv(project_folder / "performance_metrics.csv", index=False)
+        metrics_combined.to_csv(
+            project_folder / f"performance_metrics_{model_type}.csv", index=True
+        )
     except Exception as e:
         raise RuntimeError(f"Error exporting training performance metrics: {e}")
 
