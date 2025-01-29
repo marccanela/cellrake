@@ -66,7 +66,9 @@ def iterate_segmentation(
     rois = {}
     layers = {}
 
-    for tif_path in image_folder.glob("*.tif"):
+    for tif_path in tqdm(
+        list(image_folder.glob("*.tif")), desc="Preprocessing images", unit="image"
+    ):
         tag = tif_path.stem
         combined_array, layer = segment_image(tif_path, threshold_rel)
         labels = measure.label(combined_array)
