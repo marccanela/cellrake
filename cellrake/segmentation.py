@@ -4,7 +4,6 @@
 
 import math
 import pickle as pkl
-from multiprocessing import Pool
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -60,31 +59,20 @@ def convert_to_roi(
     return rois_dict
 
 
-def process_image(
-    tif_path: Path, threshold_rel: float
-) -> Tuple[str, Dict[str, Dict], np.ndarray]:
-    tag = tif_path.stem
-    combined_array, layer = segment_image(tif_path, threshold_rel)
-    labels = measure.label(combined_array)
-    polygons = extract_polygons(labels)
-    rois = convert_to_roi(polygons, layer)
-    return tag, rois, layer
-
-
 def iterate_segmentation(
     image_folder: Path, threshold_rel: float
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
+
     rois = {}
     layers = {}
 
-    with Pool() as pool:
-        results = pool.starmap(
-            process_image,
-            [(tif_path, threshold_rel) for tif_path in image_folder.glob("*.tif")],
-        )
+    for tif_path in image_folder.glob("*.tif"):
+        tag = tif_path.stem
+        combined_array, layer = segment_image(tif_path, threshold_rel)
+        labels = measure.label(combined_array)
+        polygons = extract_polygons(labels)
 
-    for tag, rois_dict, layer in results:
-        rois[tag] = rois_dict
+        rois[tag] = convert_to_roi(polygons, layer)
         layers[tag] = layer
 
     return rois, layers
