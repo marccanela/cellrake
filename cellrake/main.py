@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Union
 
 import matplotlib.pyplot as plt
-import napari
 import numpy as np
 from PIL import Image
 from sklearn.base import BaseEstimator
@@ -130,12 +129,7 @@ def train(
     project_folder.mkdir(parents=True, exist_ok=True)
 
     # Check if there is an existing segmentation
-    try:
-        rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel
-        )
-    except Exception as e:
-        raise RuntimeError(f"Error segmenting the images: {e}")
+    rois, layers = look_for_segmentation(project_folder, image_folder, threshold_rel)
 
     # Extract features and labels from ROIs
     subset_df_path = project_folder / "subset_df.pkl"

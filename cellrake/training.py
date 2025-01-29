@@ -14,7 +14,7 @@ from scipy.stats import entropy
 from sklearn.base import clone
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.model_selection import cross_val_predict, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.semi_supervised import LabelSpreading

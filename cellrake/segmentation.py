@@ -4,6 +4,7 @@
 
 import math
 import pickle as pkl
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -59,76 +60,32 @@ def convert_to_roi(
     return rois_dict
 
 
+def process_image(
+    tif_path: Path, threshold_rel: float
+) -> Tuple[str, Dict[str, Dict], np.ndarray]:
+    tag = tif_path.stem
+    combined_array, layer = segment_image(tif_path, threshold_rel)
+    labels = measure.label(combined_array)
+    polygons = extract_polygons(labels)
+    rois = convert_to_roi(polygons, layer)
+    return tag, rois, layer
+
+
 def iterate_segmentation(
     image_folder: Path, threshold_rel: float
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
-    """
-    This function iterates over all `.tif` files in the given `image_folder,` extracting all the potential regions of interest (ROIs) that may be positive.
-    The segmented layers and corresponding ROI data are stored in dictionaries with the image filename (without extension) as the key.
-
-    Parameters:
-    ----------
-    image_folder : pathlib.Path
-        A Path object pointing to the folder containing the `.tif` images to be segmented.
-    threshold_rel : float
-        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
-        This should have a value between 0 and 1.
-
-    Returns:
-    -------
-    tuple[dict[str, dict], dict[str, numpy.ndarray]]
-        A tuple containing:
-        - `rois`: A dictionary where keys are image filenames and values are dictionaries of ROI data.
-        - `layers`: A dictionary where keys are image filenames and values are the corresponding segmented layers as NumPy arrays.
-    """
     rois = {}
     layers = {}
 
-    # Iterate over each .tif file and pre-process the arrays
-    # print("Step 1 out of 2: Image preprocessing.")
-    # combined_arrays = {}
-    for tif_path in tqdm(
-        list(image_folder.glob("*.tif")), desc="Preprocessing images", unit="image"
-    ):
-        tag = tif_path.stem
-        combined_array, layer = segment_image(tif_path, threshold_rel)
-        # combined_arrays[tag] = combined_array
+    with Pool() as pool:
+        results = pool.starmap(
+            process_image,
+            [(tif_path, threshold_rel) for tif_path in image_folder.glob("*.tif")],
+        )
+
+    for tag, rois_dict, layer in results:
+        rois[tag] = rois_dict
         layers[tag] = layer
-
-        labels = measure.label(combined_array)
-        polygons = extract_polygons(labels)
-        rois[tag] = convert_to_roi(polygons, layer)
-
-    # Apply watershed
-    # print("Step 2 out of 4: Selection of images to watershed.")
-    # divide = {}
-    # non_divide = {}
-    # for tag, combined_array in tqdm(
-    #     combined_arrays.items(), desc="Processing images", unit="image"
-    # ):
-    #     global_user_input = global_watershed(layers[tag])
-    #     if global_user_input == "n":
-    #         non_divide[tag] = combined_array
-    #     elif global_user_input == "y":
-    #         divide[tag] = combined_array
-
-    # if len(divide) != 0:
-    #     print("Step 3 out of 4: Manual watershed.")
-    #     for tag, combined_array in tqdm(
-    #         divide.items(), desc="Processing images", unit="image"
-    #     ):
-    #         watershed_array = preprocess_watershed(combined_array, layers[tag])
-    #         polygons = extract_polygons(watershed_array)
-    #         rois[tag] = convert_to_roi(polygons, layers[tag])
-
-    # if len(non_divide) != 0:
-    #     print("Step 4 out of 4: Automatic watershed.")
-    #     for tag, combined_array in tqdm(
-    #         non_divide.items(), desc="Processing images", unit="image"
-    #     ):
-    #         labels = measure.label(combined_array)
-    #         polygons = extract_polygons(labels)
-    #         rois[tag] = convert_to_roi(polygons, layers[tag])
 
     return rois, layers
 
@@ -176,10 +133,8 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     # Extract the coordinates and radius from the blob
     y, x, r = blob
 
-    # Calculate the expanded radius
+    # Calculate the expanded radius and ensure blob stays within boundaries
     r = r * 1.5 * math.sqrt(2)
-
-    # Ensure the blob stays within the image boundaries
     y = np.clip(y, r, layer.shape[0] - r)
     x = np.clip(x, r, layer.shape[1] - r)
 
@@ -188,10 +143,13 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     blob_mask = np.zeros(layer.shape, dtype=bool)
     blob_mask[rr, cc] = True
 
-    # Crop the blob_image to the bounding box of the mask
-    min_row, max_row = np.where(np.any(blob_mask, axis=1))[0][[0, -1]]
-    min_col, max_col = np.where(np.any(blob_mask, axis=0))[0][[0, -1]]
+    # Find the bounding box around the mask (row and column ranges)
+    rows = np.any(blob_mask, axis=1)
+    cols = np.any(blob_mask, axis=0)
+    min_row, max_row = np.where(rows)[0][[0, -1]]
+    min_col, max_col = np.where(cols)[0][[0, -1]]
 
+    # Crop the blob image to the bounding box
     cropped_blob_mask = blob_mask[min_row : max_row + 1, min_col : max_col + 1]
     cropped_blob_image = (
         layer[min_row : max_row + 1, min_col : max_col + 1] * cropped_blob_mask
@@ -206,16 +164,15 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     cropped_binary_image = cropped_blob_image > threshold
 
     # Clean binary image by deleting artifacts and closing holes
-    labels_cropped_list = clean_binary_image(cropped_binary_image, r)
-    if len(labels_cropped_list) == 0:
+    cleaned = clean_binary_image(cropped_binary_image, r)
+    if np.sum(cleaned) == 0:
         return None
 
     # Create a full-sized label image and place the cropped labels back into it
-    labels_list = [np.zeros(layer.shape, dtype=np.uint16) for _ in labels_cropped_list]
-    for i, labels_cropped in enumerate(labels_cropped_list):
-        labels_list[i][min_row : max_row + 1, min_col : max_col + 1] = labels_cropped
+    restored_image = np.zeros(layer.shape)
+    restored_image[min_row : max_row + 1, min_col : max_col + 1] = cleaned
 
-    return labels_list
+    return restored_image
 
 
 def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.ndarray:
@@ -253,81 +210,31 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
     for blob in blobs_log:
         result = process_blob(layer, blob)
         if result is not None:
-            if isinstance(result, list):
-                binaries.extend(result)
+            binaries.append(result)
 
     if len(binaries) == 0:
-        return np.zeros_like(layer, dtype=np.uint8)
+        return np.zeros_like(layer)
 
     # Combine binaries into one single array
-    combined_array = np.any(np.array(binaries), axis=0).astype(np.uint16)
+    combined_array = np.logical_or.reduce(binaries)
 
     return combined_array
 
 
 def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
-    """
-    This function cleans the binary image by removing small holes and retaining
-    all masks that are larger than 50% of the area of the largest mask.
 
-    Parameters:
-    ----------
-    binary_image : np.ndarray
-        The input binary image.
-    r : float
-        The radius used to create a disk for morphological operations.
-
-    Returns:
-    -------
-    list
-        A list of binary masks for each valid label that are not too rectangular.
-    """
     # Remove small holes in the binary image
     cleaned = morphology.remove_small_holes(
         binary_image, area_threshold=np.sum(morphology.disk(int(r / 1.5)))
     )
 
-    # Label connected regions in the cleaned binary image
-    labeled_mask = measure.label(cleaned)
+    # Check minimum size
+    area = np.sum(cleaned)
+    min_disk_area = np.sum(morphology.disk(5))
+    if area < min_disk_area:
+        return np.zeros_like(cleaned)
 
-    # Skip if there's only the background
-    if np.max(labeled_mask) == 0:
-        return []
-
-    # Precompute the minimum disk area
-    min_disk_area = np.sum(morphology.disk(4))
-
-    # Calculate region areas using np.bincount
-    region_areas = np.bincount(labeled_mask.ravel())[1:]
-    max_area = region_areas.max()
-
-    # Filter valid labels based on area threshold
-    valid_labels = (
-        np.where((region_areas >= 0.5 * max_area) & (region_areas >= min_disk_area))[0]
-        + 1
-    )
-
-    # Skip if non valid labels
-    if len(valid_labels) == 0:
-        return []
-
-    # Create and validate masks for each valid label
-    masks = []
-
-    for label in valid_labels:
-        mask = labeled_mask == label
-
-        # Check if the mask is too rectangular
-        height, width = mask.shape
-        ellipse_area = np.pi * (width / 2) * (height / 2)
-        mask_area = np.sum(mask)
-        rect_area = height * width
-        area_difference = mask_area - ellipse_area
-
-        if area_difference <= 0.5 * (rect_area - ellipse_area):
-            masks.append(mask.astype(bool))
-
-    return masks
+    return cleaned
 
 
 def preprocess_watershed(
@@ -337,7 +244,7 @@ def preprocess_watershed(
 
     labels = measure.label(combined_array)
     unique_labels = np.unique(labels)
-    watershed_array = np.zeros_like(combined_array, dtype=np.uint16)
+    watershed_array = np.zeros_like(combined_array)
 
     # Compute background intensity
     background_mask = 1 - combined_array
@@ -542,10 +449,9 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
         A dictionary where keys are labels and values are lists of polygon coordinates.
     """
     polygons = {}
-    for label in np.unique(labels):
-        # Skip background
-        if label == 0:
-            continue
+    unique_labels = np.unique(labels)
+
+    for label in unique_labels[unique_labels > 0]:
 
         # Create a mask for the current label
         mask = labels == label
@@ -555,7 +461,7 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
 
         # If there are multiple contours, choose the largest one
         if contours:
-            largest_contour = max(contours, key=lambda c: len(c))
+            largest_contour = max(contours, key=len)
             polygons[label] = largest_contour
 
     return polygons
