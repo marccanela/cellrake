@@ -215,21 +215,18 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
 
 def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
 
-    # Remove small holes in the binary image
-    cleaned = morphology.remove_small_holes(
-        binary_image, area_threshold=np.sum(morphology.disk(int(r / 1.5)))
-    )
-
-    area = np.sum(cleaned)
-
-    # Check minimum size
     min_disk_area = 60
-    if area < min_disk_area:
-        return None
-
-    # Check maximum size
     max_disk_area = 2000
-    if area > max_disk_area:
+
+    # Remove small objects
+    cleaned = morphology.remove_small_objects(binary_image, min_size=min_disk_area)
+
+    # Remove small holes in the binary image
+    cleaned = morphology.remove_small_holes(cleaned, area_threshold=min_disk_area * 0.8)
+
+    # Check minimum and maximum size
+    area = np.sum(cleaned)
+    if area < min_disk_area or area > max_disk_area:
         return None
 
     return cleaned
