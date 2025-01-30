@@ -202,11 +202,13 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
         if result is not None:
             binaries.append(result)
 
-    if len(binaries) == 0:
-        return np.zeros_like(layer)
+    binaries = [np.asarray(b, dtype=bool) for b in binaries]
 
     # Combine binaries into one single array
-    combined_array = np.logical_or.reduce(binaries)
+    if len(binaries) > 0:
+        combined_array = np.bitwise_or.reduce(binaries)
+    else:
+        combined_array = np.zeros_like(layer, dtype=bool)
 
     return combined_array
 
