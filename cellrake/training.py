@@ -378,8 +378,7 @@ def plot_pca(total_df, project_folder):
     # Save the plot as a PNG file
     output_path = f"{project_folder}/pca_label_spreading.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-
-    # plt.show()
+    plt.close()
 
 
 def plot_pca_decision_boundary(total_df, best_model, X, y, project_folder):
@@ -460,8 +459,7 @@ def plot_pca_decision_boundary(total_df, best_model, X, y, project_folder):
     # Save the plot as a PNG file
     output_path = f"{project_folder}/pca_decision_boundary.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-
-    # plt.show()
+    plt.close()
 
 
 def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder):
@@ -545,8 +543,7 @@ def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_f
     # Save the plot as a PNG file
     output_path = f"{project_folder}/pca_train_test.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-
-    # plt.show()
+    plt.close()
 
 
 def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples, name):
