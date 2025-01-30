@@ -228,7 +228,7 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
         return None
 
     # Check maximum size
-    max_disk_area = 1500
+    max_disk_area = 2000
     if area > max_disk_area:
         return None
 
