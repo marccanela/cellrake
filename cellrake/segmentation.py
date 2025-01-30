@@ -155,14 +155,16 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
 
     # Clean binary image by deleting artifacts and closing holes
     cleaned = clean_binary_image(cropped_binary_image, r)
-    if np.sum(cleaned) == 0:
+
+    # Return None if cleaning fails
+    if cleaned is None:
         return None
 
     # Create a full-sized label image and place the cropped labels back into it
     restored_image = np.zeros(layer.shape)
     restored_image[min_row : max_row + 1, min_col : max_col + 1] = cleaned
 
-    return restored_image
+    return np.asarray(restored_image, dtype=bool)
 
 
 def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.ndarray:
@@ -202,8 +204,6 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
         if result is not None:
             binaries.append(result)
 
-    binaries = [np.asarray(b, dtype=bool) for b in binaries]
-
     # Combine binaries into one single array
     if len(binaries) > 0:
         combined_array = np.bitwise_or.reduce(binaries)
@@ -220,11 +220,17 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
         binary_image, area_threshold=np.sum(morphology.disk(int(r / 1.5)))
     )
 
-    # Check minimum size
     area = np.sum(cleaned)
-    min_disk_area = np.sum(morphology.disk(5))
+
+    # Check minimum size
+    min_disk_area = 60
     if area < min_disk_area:
-        return np.zeros_like(cleaned)
+        return None
+
+    # Check maximum size
+    max_disk_area = 1500
+    if area > max_disk_area:
+        return None
 
     return cleaned
 
