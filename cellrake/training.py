@@ -123,6 +123,11 @@ def create_subset_df(
     for tag in tqdm(rois.keys(), desc="Extracting input features", unit="image"):
         roi_dict = rois[tag]
         layer = layers[tag]
+
+        # Check if roi_dict is empty
+        if not roi_dict:
+            continue
+
         roi_props_dict[tag] = create_stats_dict(roi_dict, layer)
 
     # Flatten the dictionary structure for input features
