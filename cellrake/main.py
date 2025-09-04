@@ -4,236 +4,157 @@
 
 import pickle as pkl
 from pathlib import Path
-from typing import Union
+from typing import Dict
 
-import matplotlib.pyplot as plt
-import numpy as np
-from PIL import Image
+import pandas as pd
 from sklearn.base import BaseEstimator
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.svm import SVC
-from tqdm import tqdm
 
 from cellrake.predicting import iterate_predicting
 from cellrake.segmentation import iterate_segmentation
 from cellrake.training import active_learning, create_subset_df
-from cellrake.utils import build_project, crop
 
 
-def look_for_segmentation(project_folder, image_folder, threshold_rel, watershed):
-    """
-    Check for existing segmentation results or perform segmentation on images.
+class CellRake:
 
-    This function checks if a segmentation file already exists for the specified
-    `project_folder`. If it exists, it loads the file and returns the segmentation data.
-    If not, it performs segmentation on the images in `image_folder` based on a given
-    threshold, saves the results, and returns them.
+    def __init__(
+        self,
+        image_folder: Path,
+        project_dir: Path,
+        segmented_data: dict = None,
+    ):
+        """
+        Initialize a CellRake object.
 
-    Parameters
-    ----------
-    project_folder : Path
-        The directory path where the project files are stored, including any
-        existing segmentation data.
-    image_folder : Path
-        The directory path containing the images to be segmented.
-    threshold_rel : float
-        The relative threshold used for segmentation in `iterate_segmentation`.
+        Parameters
+        ----------
+        image_folder : Path
+            Folder containing TIFF images.
+        project_dir : Path
+            Directory to save models and results.
+        segmented_data : dict, optional
+            Already segmented ROIs and layers (from a saved segmentation).
+        """
+        self.image_folder: Path = image_folder
+        self.segmented_data: Dict = segmented_data
+        self.project_dir: Path = project_dir
+        self.model: BaseEstimator = None
+        self.metrics: Dict = None
+        self.counts: pd.DataFrame = None
+        self.features: pd.DataFrame = None
 
-    Returns
-    -------
-    rois : dict
-        A dictionary containing segmented regions of interest (ROIs) for each image.
-    layers : dict
-        A dictionary containing the processed layers for each image in `image_folder`.
-    """
-    # Check if there is an existing segmentation
-    rois_path = project_folder / f"{image_folder.stem}_segmentation.pkl"
-    if rois_path.exists():
-        print(f"Existing segmentation detected.")
+    def segment_images(self, threshold_rel: float):
+        """
+        Run segmentation on the images in `image_folder`.
+        If `segmented_data` exists, reuse it.
+        """
+        if self.segmented_data is not None:
+            print("Using pre-segmented data.")
+            return self.segmented_data
 
-        # Open segmentation
-        try:
-            with open(rois_path, "rb") as file:
-                rois = pkl.load(file)
-        except Exception as e:
-            raise RuntimeError(f"Error loading existing segmentation file: {e}")
+        else:
+            if self.image_folder is None:
+                raise ValueError("Please, define image_folder before segment_images.")
 
-        # Create layers dictionary
-        layers = {}
-        for tif_path in tqdm(
-            list(image_folder.glob("*.tif")), desc="Openining images", unit="image"
-        ):
-            try:
-                layer = np.asarray(Image.open(tif_path))
-                layer = crop(layer)
-                layer = layer.astype(np.uint8)
-                tag = tif_path.stem
-                layers[tag] = layer
-            except Exception as e:
-                raise RuntimeError(f"Error processing image {tif_path.stem}: {e}")
+            rois, layers = iterate_segmentation(self.image_folder, threshold_rel)
+            self.segmented_data = {"rois": rois, "layers": layers}
+            return self.segmented_data
 
-    else:
-        # Segment images to obtain two dictionaries: 'rois' and 'layers'
-        try:
-            rois, layers = iterate_segmentation(image_folder, threshold_rel, watershed)
-        except Exception as e:
-            raise RuntimeError(f"Error during segmentation: {e}")
+    def train(
+        self,
+        threshold_rel: float = 0.1,
+        model_type: str = "rf",
+        metric_to_optimize: str = "f1_score",
+        active_learning_bool: bool = False,
+    ):
+        """
+        Train a model using active learning on the segmented images.
+        """
+        seg = self.segment_images(threshold_rel)
+        subset_df = create_subset_df(seg["rois"], seg["layers"])
+        model, metrics_train, metrics_val = active_learning(
+            subset_df,
+            seg["rois"],
+            seg["layers"],
+            model_type,
+            metric_to_optimize,
+            active_learning_bool,
+        )
+        self.model = model
+        self.metrics = {"train": metrics_train, "validation": metrics_val}
+        print("Model trained successfully.")
 
-        # Save the rois
-        try:
-            with open(rois_path, "wb") as file:
-                pkl.dump(rois, file)
-        except Exception as e:
-            raise RuntimeError(f"Error saving segmentation results: {e}")
+    def save_model(self, filename: str):
+        """Save the trained model with a custom name."""
+        if self.model is None:
+            raise ValueError("No trained model to save.")
+        if self.project_dir is None:
+            raise ValueError("Please, define project_dir before save_model.")
 
-    return rois, layers
+        with open(self.project_dir / f"{filename}.pkl", "wb") as file:
+            pkl.dump(self.model, file)
+        print(f"Model saved as {self.project_dir.stem / f'{filename}.pkl'}")
 
+    def load_model(self, filename: str):
+        """Load a trained model from disk."""
+        if self.project_dir is None:
+            raise ValueError("Please, define project_dir before load_model.")
+        filepath = self.project_dir / f"{filename}.pkl"
+        if not filepath.exists():
+            raise FileNotFoundError(f"Model file {filepath} not found.")
 
-def train(
-    image_folder: Path,
-    threshold_rel: float,
-    model_type: str = "svm",
-    watershed: bool = True,
-) -> Union[Pipeline, SVC, RandomForestClassifier, LogisticRegression]:
-    """
-    This function trains a machine learning model using segmented images from the specified folder
-    and an active learning approach.
+        with open(filepath, "rb") as file:
+            self.model = pkl.load(file)
+        print(f"Model {filename} loaded successfully. Use .model to access it.")
 
-    Parameters:
-    ----------
-    image_folder : Path
-        The folder containing TIFF images to be segmented and used for training.
-    threshold_rel : float
-        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
-        This should have a value between 0 and 1.
-    model_type : str, optional
-        The type of model to train. Options are 'svm', 'rf', 'et', or 'logreg'.
+    def save_segmentation(self, filename: str):
+        """Save the segmented data with a custom name."""
+        if self.segmented_data is None:
+            raise ValueError("No segmented data to save.")
+        if self.project_dir is None:
+            raise ValueError("Please, define project_dir before save_segmentation.")
 
-    Returns:
-    -------
-    sklearn Pipeline or RandomForestClassifier
-        The best estimator found by the active learning.
-    """
-    # Validate model type
-    if model_type not in {"svm", "rf", "logreg", "et"}:
-        raise ValueError(
-            f"Invalid model type '{model_type}'. Choose from 'svm', 'rf', 'et', or 'logreg'."
+        with open(self.project_dir / f"{filename}.pkl", "wb") as file:
+            pkl.dump(self.segmented_data, file)
+        print(f"Segmentation saved as {self.project_dir.stem / f'{filename}.pkl'}")
+
+    def load_segmentation(self, filename: str):
+        """Load segmented data from disk."""
+        if self.project_dir is None:
+            raise ValueError("Please, define project_dir before load_segmentation.")
+        filepath = self.project_dir / f"{filename}.pkl"
+        if not filepath.exists():
+            raise FileNotFoundError(f"Segmentation file {filepath} not found.")
+
+        with open(filepath, "rb") as file:
+            self.segmented_data = pkl.load(file)
+        print(
+            f"Segmentation {filename} loaded successfully. Use .segmented_data to access it."
         )
 
-    # Create the base project folder with "_training" suffix
-    project_folder = image_folder.parent / f"{image_folder.stem}_training"
-    project_folder.mkdir(parents=True, exist_ok=True)
+    def analyze(self, threshold_rel: float = 0.5, cmap: str = "Reds"):
+        """
+        Apply the trained model to new images or a segmented object.
+        """
+        if self.model is None:
+            raise ValueError(
+                """
+                No trained model available:
+                - Load a previously trained model using the load_model method.
+                - Train a new model using the train method.
+                """
+            )
 
-    # Check if there is an existing segmentation
-    try:
-        rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel, watershed
+        if self.project_dir is None:
+            raise ValueError("Please, define project_dir before analyze.")
+
+        seg = self.segment_images(threshold_rel)
+        counts, features = iterate_predicting(
+            seg["layers"], seg["rois"], cmap, self.model, self.project_dir
         )
-    except Exception as e:
-        raise RuntimeError(f"Error segmenting the images: {e}")
+        self.counts = counts
+        self.features = features
 
-    # Extract features and labels from ROIs
-    subset_df_path = project_folder / "subset_df.pkl"
-    if subset_df_path.exists():
-        print(f"Existing subset dataframe detected.")
-        try:
-            with open(subset_df_path, "rb") as file:
-                subset_df = pkl.load(file)
-        except Exception as e:
-            raise RuntimeError(f"Error loading existing subset dataframe: {e}")
-    else:
-        try:
-            subset_df = create_subset_df(rois, layers)
-            with open(subset_df_path, "wb") as file:
-                pkl.dump(subset_df, file)
-        except Exception as e:
-            raise RuntimeError(f"Error extracting features and labels: {e}")
-
-    # Perform active learning
-    try:
-        model, performance_df_train, performance_df_validation = active_learning(
-            subset_df, rois, layers, model_type
-        )
-    except Exception as e:
-        raise RuntimeError(f"Error during active learning: {e}")
-
-    # Save the trained model
-    try:
-        with open(
-            project_folder / f"{image_folder.stem}_model_{model_type}.pkl", "wb"
-        ) as file:
-            pkl.dump(model, file)
-    except Exception as e:
-        raise RuntimeError(f"Error saving the model: {e}")
-
-    # Save the metrics
-    try:
-        performance_df_train.to_csv(
-            project_folder / "training_performance_metrics.csv", index=False
-        )
-        performance_df_validation.to_csv(
-            project_folder / "validation_performance_metrics.csv", index=False
-        )
-    except Exception as e:
-        raise RuntimeError(f"Error exporting training performance metrics: {e}")
-
-    return model
-
-
-def analyze(
-    image_folder: Path,
-    model: BaseEstimator,
-    threshold_rel: float,
-    cmap: str = "Reds",
-    watershed: bool = True,
-) -> None:
-    """
-    This function processes TIFF images located in the `image_folder` by:
-    1. Building a project directory.
-    2. Segmenting the images to identify regions of interest (ROIs).
-    3. Exporting the segmented ROIs to the project folder.
-    4. Applying a prediction model (optional) to the segmented ROIs.
-
-    Parameters:
-    ----------
-    image_folder : Path
-        A `Path` object representing the folder containing TIFF image files to analyze.
-    model : BaseEstimator
-        A scikit-learn pipeline object used for predictions. This model should be previously obtained
-        through functions like `cellrake.main.train`.
-    threshold_rel : float
-        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
-        This should have a value between 0 and 1.
-    cmap : str, optional
-        The color map to use for visualization when plotting results using matplotlib. Default is "Reds".
-        It should be one of the available color maps in matplotlib, such as 'Reds', 'Greens', etc.
-
-    Returns:
-    -------
-    None
-    """
-
-    # Ensure the provided color map is valid
-    if cmap not in plt.colormaps():
-        raise ValueError(
-            f"Invalid colormap '{cmap}'. Available options are: {', '.join(plt.colormaps())}"
-        )
-
-    # Create a project folder for organizing results
-    project_folder = build_project(image_folder)
-
-    # Check if there is an existing segmentation
-    try:
-        rois, layers = look_for_segmentation(
-            project_folder, image_folder, threshold_rel, watershed
-        )
-    except Exception as e:
-        raise RuntimeError(f"Error segmenting the images: {e}")
-
-    # Apply the prediction model to the layers and ROIs
-    try:
-        iterate_predicting(layers, rois, cmap, project_folder, model)
-    except Exception as e:
-        raise RuntimeError(f"Error during prediction iteration: {e}")
+        # Save counts and features to CSV files
+        counts.to_csv(self.project_dir / "cell_counts.csv", index=False)
+        features.to_csv(self.project_dir / "cell_features.csv", index=False)
+        print("\nAnalysis complete. Results saved to project directory.")

@@ -14,6 +14,7 @@ from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
 from sklearn.decomposition import PCA
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -768,6 +769,9 @@ def train_model(X_labeled, y_labeled, model_type):
         best_model = train_rf(X_labeled, y_labeled, model_type)
     elif model_type == "logreg":
         best_model = train_logreg(X_labeled, y_labeled)
+    elif model_type == "dummy":
+        best_model = DummyClassifier(strategy="most_frequent")
+        best_model.fit(X_labeled, y_labeled)
 
     return best_model
 

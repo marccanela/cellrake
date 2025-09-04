@@ -204,9 +204,10 @@ def active_learning(
     subset_df: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
-    model_type: str = "svm",
-    metric_to_optimize: str = "f1_score",
-) -> Tuple[Pipeline, pd.DataFrame]:
+    model_type: str,
+    metric_to_optimize: str,
+    active_learning_bool: bool,
+) -> Tuple[Pipeline, pd.DataFrame, pd.DataFrame]:
     """
     The function begins by splitting the dataset into training and testing sets, with a small
     portion of the training set manually labeled. It then enters a loop where the model is trained,
@@ -232,6 +233,9 @@ def active_learning(
 
     metric_to_optimize : str, optional
         The metric to optimize during active learning. Default is 'f1_score'.
+
+    active_learning_bool : bool, optional
+        Whether to perform active learning or not. Default is False.
 
     Returns:
     -------
@@ -259,12 +263,23 @@ def active_learning(
     labelled_X = exploratory_df
     labelled_y = exploratory_df_labeled
 
-    initial_positives_size = max(min(int(len(pool_X) * 0.005), 50), 25)
     n_extract_per_cluster_1 = 5
+
+    # Define thresholds
+    min_pos = 25
+    min_neg = 25
+    max_total = 200
 
     while True:
         positives = labelled_y["label_column"].astype(int).sum()
-        if positives >= initial_positives_size or pool_X.empty:
+        negatives = len(labelled_y) - positives
+
+        # stopping criteria
+        if (
+            (positives >= min_pos and negatives >= min_neg)
+            or pool_X.empty
+            or len(labelled_y) >= max_total
+        ):
             break
 
         # Identify clusters enriched in manual labeling "1" and "0"
@@ -289,17 +304,24 @@ def active_learning(
                 if cluster_labels.sum() > 0:
                     enriched_clusters_1.append(cluster)
 
-        # Extract 5 instances from each enriched cluster
-        if len(enriched_clusters_1) > 0:
-            num_clusters_1 = len(enriched_clusters_1)
-            num_clusters_0 = min(len(enriched_clusters_0), num_clusters_1)
+        # Check if there's any positive or negative instance in the labeled data
+        unique_labels = labelled_y["label_column"].unique()
 
-            selected_clusters_0 = np.random.choice(
-                enriched_clusters_0, num_clusters_0, replace=False
-            ).tolist()
-            selected_clusters = enriched_clusters_1 + selected_clusters_0
+        if len(unique_labels) == 1:
+            # Case: only positives or only negatives so far
+            selected_clusters = clusters.tolist()
         else:
-            selected_clusters = clusters
+            # Extract 5 instances from each enriched cluster
+            if len(enriched_clusters_1) > 0:
+                num_clusters_1 = len(enriched_clusters_1)
+                num_clusters_0 = min(len(enriched_clusters_0), num_clusters_1)
+
+                selected_clusters_0 = np.random.choice(
+                    enriched_clusters_0, num_clusters_0, replace=False
+                ).tolist()
+                selected_clusters = enriched_clusters_1 + selected_clusters_0
+            else:
+                selected_clusters = clusters.tolist()
 
         exploratory_dfs = []
         for cluster in selected_clusters:
@@ -319,6 +341,15 @@ def active_learning(
         labelled_X = pd.concat([labelled_X, exploratory_df], ignore_index=True)
         labelled_y = pd.concat([labelled_y, exploratory_df_labeled], ignore_index=True)
 
+    # Check if we have only one class
+    labels_present = labelled_y["label_column"].unique()
+    if len(labels_present) < 2:
+        print(f"Warning: Only one class likely found: {labels_present}.")
+
+        # Return a dummy classifier
+        dummy_model = train_model(X_labeled.values, y_labeled.values, "dummy")
+        return dummy_model, pd.DataFrame(), pd.DataFrame()
+
     # Balance train dataset
     labelled_y = labelled_y.astype(int)
     labelled_Xy = pd.concat([labelled_X, labelled_y], axis=1)
@@ -327,6 +358,12 @@ def active_learning(
     # Prepare datasets
     X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
     y_labeled = balanced_Xy["label_column"].astype(int)
+
+    # Check if there are instances of both classes in the labeled data
+    if len(y_labeled.unique()) < 2:
+        raise ValueError(
+            "Labeled data must contain instances of both classes (0 and 1)."
+        )
 
     # Pre-active learning loop
     initial_model = train_model(X_labeled.values, y_labeled.values, model_type)
@@ -376,13 +413,9 @@ def active_learning(
     certain_pool = pd.DataFrame()
     uncertain_pool = pd.DataFrame()
 
-    print("Starting active learning loop...")
-    print(f"Optimizing the model based on {metric_to_optimize}")
-
     while True:
 
         iteration += 1  # Increment iteration count
-        print(f"Iteration {iteration}")
 
         if len(balanced_Xy) > 1000:
             balanced_Xy = balanced_Xy.sample(n=1000, random_state=42)
@@ -403,6 +436,13 @@ def active_learning(
 
         if pool_X.empty:
             break
+
+        if active_learning_bool == False:
+            break
+
+        print("Starting active learning loop...")
+        print(f"Optimizing the model based on {metric_to_optimize}")
+        print(f"Iteration {iteration}")
 
         # Check if the improvement in performance is minimal
         current_performance = metrics_validation[metric_to_optimize]
@@ -469,8 +509,8 @@ def active_learning(
 
         if not uncertain_pool.empty:
             balanced_uncertain, excluded_uncertain = balance_classes(uncertain_pool)
-            if not balanced_certain.empty:
-                balanced_certain["label_column"] = balanced_certain[
+            if not balanced_uncertain.empty:
+                balanced_uncertain["label_column"] = balanced_uncertain[
                     "label_column"
                 ].astype(int)
                 balanced_Xy = pd.concat(
@@ -490,33 +530,34 @@ def active_learning(
     performance_df_validation = pd.DataFrame(metrics_validation_list)
 
     # Roll back to the best model
-    best_model = models_list[best_iteration - 1]
-    print(f"Rolling back to the model from interation (iteration {best_iteration})")
+    if active_learning_bool == True:
+        best_model = models_list[best_iteration - 1]
+        print(f"Rolling back to the best model (iteration {best_iteration})")
 
-    # Plot the metrics
-    metrics = list(metrics_validation_list[0].keys())
-    fig, axes = plt.subplots(len(metrics), 1, figsize=(12, 20))
+        # Plot the metrics
+        metrics = list(metrics_validation_list[0].keys())
+        _, axes = plt.subplots(len(metrics), 1, figsize=(12, 20))
 
-    for i, metric in enumerate(metrics):
-        axes[i].plot(
-            performance_df_train.index + 1,
-            performance_df_train[metric],
-            label="Training",
-            marker="o",
-        )
-        axes[i].plot(
-            performance_df_validation.index + 1,
-            performance_df_validation[metric],
-            label="Validation",
-            marker="o",
-        )
-        axes[i].set_xlabel("Iteration")
-        axes[i].set_ylim([0, 1])
-        axes[i].set_ylabel(metric)
-        axes[i].legend()
-        axes[i].grid()
+        for i, metric in enumerate(metrics):
+            axes[i].plot(
+                performance_df_train.index + 1,
+                performance_df_train[metric],
+                label="Training",
+                marker="o",
+            )
+            axes[i].plot(
+                performance_df_validation.index + 1,
+                performance_df_validation[metric],
+                label="Validation",
+                marker="o",
+            )
+            axes[i].set_xlabel("Iteration")
+            axes[i].set_ylim([0, 1])
+            axes[i].set_ylabel(metric)
+            axes[i].legend()
+            axes[i].grid()
 
-    plt.tight_layout()
-    plt.show()
+        plt.tight_layout()
+        plt.show()
 
     return best_model, performance_df_train, performance_df_validation

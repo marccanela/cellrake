@@ -120,8 +120,8 @@ def iterate_predicting(
     layers: Dict[str, np.ndarray],
     rois: Dict[str, Dict[str, np.ndarray]],
     cmap: mcolors.Colormap,
-    project_folder: Path,
     best_model: BaseEstimator,
+    project_folder: Path,
 ) -> None:
     """
     This function processes each image by identifying positive ROIs using
@@ -140,11 +140,11 @@ def iterate_predicting(
     cmap : mcolors.Colormap
         The colormap to be used for visualization.
 
-    project_folder : Path
-        The path to the folder where results will be saved.
-
     best_model : BaseEstimator
         A trained model with a `predict` method for classifying ROIs.
+
+    project_folder : Path
+        The directory where the processed ROIs and visualizations will be saved.
 
     Returns:
     -------
@@ -154,7 +154,6 @@ def iterate_predicting(
     Notes:
     -----
     - The function assumes that each image tag in `rois` has a corresponding image layer in `layers`.
-    - Results are saved as "counts.csv" and "counts.xlsx" in the `project_folder`.
     """
     results = []
     concatenated_df = pd.DataFrame()
@@ -189,15 +188,10 @@ def iterate_predicting(
         except Exception as e:
             print(f"Error processing {tag}: {e}")
 
-    # Export keeped ROIs
-    detected_path = f"{project_folder}/detected.pkl"
-    with open(detected_path, "wb") as file:
-        pkl.dump(detected, file)
-
     # Convert results to a DataFrame and save to CSV and Excel
     df = pd.DataFrame(results, columns=["file_name", "num_cells"])
-    export_data(df, project_folder, "counts")
-    export_data(concatenated_df, project_folder, "features")
+
+    return df, concatenated_df
 
 
 def colocalize(
