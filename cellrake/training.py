@@ -2,24 +2,28 @@
 @author: Marc Canela
 """
 
+import pickle as pkl
+from pathlib import Path
 from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from imblearn.over_sampling import SMOTE
+from scipy.stats import entropy
+from sklearn.base import clone
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.semi_supervised import LabelSpreading
 from tqdm import tqdm
 
 from cellrake.utils import (
-    balance_classes,
     create_stats_dict,
     crop_cell_large,
     evaluate_model,
-    extract_uncertain_samples,
     train_model,
 )
 
@@ -56,24 +60,24 @@ def user_input(roi_values: np.ndarray, layer: np.ndarray) -> Dict[str, Dict[str,
     fig, axes = plt.subplots(1, 4, figsize=(16, 5))
 
     # Full image with ROI highlighted
-    axes[0].imshow(layer, cmap="Reds")
-    axes[0].plot(x_coords, y_coords, "b-", linewidth=1)
+    axes[0].imshow(layer, cmap="viridis")
+    axes[0].plot(x_coords, y_coords, "m-", linewidth=1)
     axes[0].axis("off")  # Hide the axis
 
     # Full image without ROI highlighted
-    axes[1].imshow(layer, cmap="Reds")
+    axes[1].imshow(layer, cmap="viridis")
     axes[1].axis("off")  # Hide the axis
 
     # Cropped image with padding, ROI highlighted
     layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
         layer, x_coords, y_coords, padding=120
     )
-    axes[2].imshow(layer_cropped_small, cmap="Reds")
-    axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
+    axes[2].imshow(layer_cropped_small, cmap="viridis")
+    axes[2].plot(x_coords_cropped, y_coords_cropped, "m-", linewidth=1)
     axes[2].axis("off")  # Hide the axis
 
     # Cropped image without ROI highlighted
-    axes[3].imshow(layer_cropped_small, cmap="Reds")
+    axes[3].imshow(layer_cropped_small, cmap="viridis")
     axes[3].axis("off")  # Hide the axis
 
     plt.tight_layout()
@@ -91,7 +95,7 @@ def user_input(roi_values: np.ndarray, layer: np.ndarray) -> Dict[str, Dict[str,
 
 
 def create_subset_df(
-    rois: Dict[str, dict], layers: Dict[str, np.ndarray]
+    rois: Dict[str, dict], layers: Dict[str, np.ndarray], clusters: int
 ) -> pd.DataFrame:
     """
     This function processes the provided ROIs by calculating various statistical and texture features
@@ -119,6 +123,11 @@ def create_subset_df(
     for tag in tqdm(rois.keys(), desc="Extracting input features", unit="image"):
         roi_dict = rois[tag]
         layer = layers[tag]
+
+        # Check if roi_dict is empty
+        if not roi_dict:
+            continue
+
         roi_props_dict[tag] = create_stats_dict(roi_dict, layer)
 
     # Flatten the dictionary structure for input features
@@ -136,7 +145,7 @@ def create_subset_df(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=0.95, random_state=42)),
-            ("kmeans", KMeans(n_clusters=10, random_state=42)),
+            ("kmeans", KMeans(n_clusters=clusters, random_state=42)),
         ]
     )
     best_clusters = kmeans_pipeline.fit_predict(features_df)
@@ -200,14 +209,300 @@ def manual_labeling(
     return labels_df
 
 
-def active_learning(
+def label_speading(subset_df, rois, layers, samples):
+
+    # Identify the nature of the clusters
+    pool_X = subset_df.copy()
+
+    # Explore and label the clusters
+    exploratory_dfs = []
+    for cluster in pool_X["cluster"].unique():
+        cluster_df = pool_X[pool_X["cluster"] == cluster]
+        if len(cluster_df) >= samples:
+            sampled_df = cluster_df.sample(n=samples, random_state=42)
+        else:
+            sampled_df = cluster_df
+        exploratory_dfs.append(sampled_df)
+
+    exploratory_df = pd.concat(exploratory_dfs)
+    exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
+
+    # Extract labelled features and labels
+    X_labeled = exploratory_df.drop(columns="cluster").values
+    y_labeled = exploratory_df_labeled["label_column"].values.astype(int)
+
+    # Standardize the labeled data
+    scaler = StandardScaler()
+    X_labeled_standardized = scaler.fit_transform(X_labeled)
+
+    # Oversample the minority class
+    smote = SMOTE(sampling_strategy="minority")
+    X_resampled, y_resampled = smote.fit_resample(X_labeled_standardized, y_labeled)
+
+    # Standardize the pool_X data
+    X_pool = pool_X.drop(columns="cluster").values
+    X_pool_standardized = scaler.transform(X_pool)  # Use the same scaler as above
+
+    # Combine the resampled labeled data with the standardized pool_X (unlabeled data)
+    X_combined = np.vstack((X_resampled, X_pool_standardized))
+    y_combined = np.concatenate([y_resampled, [-1] * len(X_pool)])
+
+    # Initialize and fit the LabelSpreading model
+    ls = LabelSpreading(kernel="knn")
+    ls.fit(X_combined, y_combined)
+
+    # Separate back into labeled and pool data
+    labels_combined = ls.transduction_
+    labels_pool = labels_combined[len(X_resampled) :]
+
+    # Compute probabilities
+    probabilities = ls.label_distributions_
+    pool_probabilities = probabilities[len(X_resampled) :]
+    is_zero_probabilities = np.all(pool_probabilities == [0, 0], axis=1)
+    myentropy = entropy(pool_probabilities.T, axis=0)
+
+    # Create new total_df
+    total_df = subset_df.copy()
+    total_df["labels"] = labels_pool
+    total_df["is_zero_prob"] = is_zero_probabilities
+    total_df["myentropy"] = myentropy
+
+    # Keep original manually labelled
+    exploratory_df_labeled["label_column"] = exploratory_df_labeled[
+        "label_column"
+    ].astype(int)
+    for idx in exploratory_df_labeled.index:
+        if idx in total_df.index:
+            total_df.at[idx, "labels"] = exploratory_df_labeled.at[idx, "label_column"]
+    total_df["manual"] = False
+    common_indices = total_df.index.intersection(exploratory_df_labeled.index)
+    total_df.loc[common_indices, "manual"] = True
+
+    return total_df
+
+
+def plot_pca(total_df, project_folder):
+
+    # Create colormaps
+    pastel1_colors = ["#fbb4ae", "#b3cde3"]  # First two colors of Pastel1
+    set1_colors = ["#e41a1c", "#377eb8"]  # First two colors of Set1
+
+    # Reduce the dimensions of the data to 2D using PCA for visualization
+    pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=2, random_state=42)),
+        ]
+    )
+    X = total_df.drop(
+        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+    ).values
+    X = pipeline.fit_transform(X)
+
+    # Rotated loading scores
+    loading_scores = pipeline.named_steps["pca"].components_
+    max_contributing_features = np.argmax(np.abs(loading_scores), axis=1)
+    feature_names = total_df.drop(
+        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+    ).columns
+    most_contributing_features = [feature_names[i] for i in max_contributing_features]
+
+    # Build masks
+    label_0 = total_df.labels == 0
+    label_1 = total_df.labels == 1
+    correct_prob = total_df.is_zero_prob == False
+    confident = total_df.myentropy < 0.2
+    manual = total_df.manual == True
+
+    # Plot the data points
+    plt.figure()
+
+    # Negative pseudo-labeled
+    mask_negative_pseudo = label_0 & correct_prob & confident & ~manual
+    X_negative_pseudo = X[mask_negative_pseudo]
+    plt.scatter(
+        X_negative_pseudo[:, 0],
+        X_negative_pseudo[:, 1],
+        color=pastel1_colors[1],
+        marker="x",
+        label="Negative Pseudo-labeled",
+    )
+
+    # Positive pseudo-labeled
+    mask_positive_pseudo = label_1 & correct_prob & confident & ~manual
+    X_positive_pseudo = X[mask_positive_pseudo]
+    plt.scatter(
+        X_positive_pseudo[:, 0],
+        X_positive_pseudo[:, 1],
+        color=pastel1_colors[0],
+        marker="x",
+        label="Positive Pseudo-labeled",
+    )
+
+    # Negative labeled
+    mask_negative_manual = label_0 & manual
+    X_negative_manual = X[mask_negative_manual]
+    plt.scatter(
+        X_negative_manual[:, 0],
+        X_negative_manual[:, 1],
+        color=set1_colors[1],
+        edgecolors="k",
+        marker="o",
+        label="Negative Labeled",
+    )
+
+    # Positive labeled
+    mask_positive_manual = label_1 & manual
+    X_positive_manual = X[mask_positive_manual]
+    plt.scatter(
+        X_positive_manual[:, 0],
+        X_positive_manual[:, 1],
+        color=set1_colors[0],
+        edgecolors="k",
+        marker="o",
+        label="Positive Labeled",
+    )
+
+    # Add legend and title
+    plt.legend()
+    plt.title("2D PCA Visualization of Labeled and Pseudo-labeled Data")
+    plt.xlabel(f"PC1 ({most_contributing_features[0]})")
+    plt.ylabel(f"PC2 ({most_contributing_features[1]})")
+
+    # Save the plot as a PNG file
+    output_path = f"{project_folder}/pca_label_spreading.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder):
+
+    # Reduce to 2D using PCA
+    pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=2, random_state=42)),
+        ]
+    )
+    pipeline.fit(X)
+    X_2d_train = pipeline.transform(X_train)
+    X_2d_test = pipeline.transform(X_test)
+
+    # Create colormaps
+    set1_colors = ["#e41a1c", "#377eb8"]  # First two colors of Set1
+
+    # Rotated loading scores
+    loading_scores = pipeline.named_steps["pca"].components_
+    max_contributing_features = np.argmax(np.abs(loading_scores), axis=1)
+    feature_names = total_df.drop(
+        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+    ).columns
+    most_contributing_features = [feature_names[i] for i in max_contributing_features]
+
+    # Build masks
+    label_0_train = y_train == 0
+    label_1_train = y_train == 1
+    label_0_test = y_test == 0
+    label_1_test = y_test == 1
+
+    # Negative Test
+    X_2d_test_0 = X_2d_test[label_0_test]
+    plt.scatter(
+        X_2d_test_0[:, 0],
+        X_2d_test_0[:, 1],
+        color=set1_colors[1],
+        marker="x",
+        label="Negative Test",
+    )
+
+    # Positive Test
+    X_2d_test_1 = X_2d_test[label_1_test]
+    plt.scatter(
+        X_2d_test_1[:, 0],
+        X_2d_test_1[:, 1],
+        color=set1_colors[0],
+        marker="x",
+        label="Positive Test",
+    )
+
+    # Negative Train
+    X_2d_train_0 = X_2d_train[label_0_train]
+    plt.scatter(
+        X_2d_train_0[:, 0],
+        X_2d_train_0[:, 1],
+        color=set1_colors[1],
+        edgecolors="k",
+        marker="o",
+        label="Negative Train",
+    )
+
+    # Positive Train
+    X_2d_train_1 = X_2d_train[label_1_train]
+    plt.scatter(
+        X_2d_train_1[:, 0],
+        X_2d_train_1[:, 1],
+        color=set1_colors[0],
+        edgecolors="k",
+        marker="o",
+        label="Positive Train",
+    )
+
+    # Add legend and title
+    plt.legend()
+    plt.title("2D PCA Visualization of Train-Test")
+    plt.xlabel(f"PC1 ({most_contributing_features[0]})")
+    plt.ylabel(f"PC2 ({most_contributing_features[1]})")
+
+    # Save the plot as a PNG file
+    output_path = f"{project_folder}/pca_train_test.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples, name):
+
+    label_speading_path = project_folder / name
+
+    if label_speading_path.exists():
+        print("Existing pseudo-labeled dataset detected.")
+        user_input = ""  # Initialize the variable to avoid unreferenced errors
+        while user_input not in ["y", "n"]:
+            user_input = input("Do you want to load it? (y/n): ").strip().lower()
+            if user_input == "y":
+                try:
+                    with open(label_speading_path, "rb") as file:
+                        total_df = pkl.load(file)
+                    print("Successfully loaded the existing pseudo-labeled dataset.")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Error loading existing pseudo-labeled dataset: {e}"
+                    )
+                return total_df
+            elif user_input == "n":
+                print("Regenerating the pseudo-labeled dataset...")
+                break
+            else:
+                print("Invalid input. Please enter 'y' for yes or 'n' for no.")
+
+    else:
+        print("No existing pseudo-labeled dataset found. Generating a new one...")
+
+    total_df = label_speading(subset_df, rois, layers, samples)
+    plot_pca(total_df, project_folder)
+    with open(label_speading_path, "wb") as file:
+        pkl.dump(total_df, file)
+    print("Pseudo-labeled dataset generated and saved.")
+    return total_df
+
+
+def train_classifier(
     subset_df: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
+    samples: int,
     model_type: str,
-    metric_to_optimize: str,
-    active_learning_bool: bool,
-) -> Tuple[Pipeline, pd.DataFrame, pd.DataFrame]:
+    project_folder: Path,
+) -> Tuple[Pipeline, pd.DataFrame]:
     """
     The function begins by splitting the dataset into training and testing sets, with a small
     portion of the training set manually labeled. It then enters a loop where the model is trained,
@@ -228,336 +523,79 @@ def active_learning(
         A dictionary where keys are image tags and values are 2D NumPy arrays representing
         the image layers from which the ROIs were extracted.
 
+    samples : int
+        The number of samples to draw from each cluster for initial labeling.
+
     model_type : str, optional
         The type of model to train. Options are 'svm', 'rf', 'et', or 'logreg'. Default is 'svm'.
 
-    metric_to_optimize : str, optional
-        The metric to optimize during active learning. Default is 'f1_score'.
-
-    active_learning_bool : bool, optional
-        Whether to perform active learning or not. Default is False.
+    project_folder : Path
+        The path to the project folder where results and models will be saved.
 
     Returns:
     -------
     Tuple[Pipeline, pd.DataFrame]
         The best estimator found by active learning and a DataFrame with performance metrics.
     """
-
-    # Identify the nature of the clusters
-    pool_X = subset_df.copy()
-    clusters = pool_X["cluster"].unique()
-
-    exploratory_dfs = []
-    for cluster in clusters:
-        cluster_df = pool_X[pool_X["cluster"] == cluster]
-        if len(cluster_df) >= 5:
-            sampled_df = cluster_df.sample(n=5, random_state=42)
-        else:
-            sampled_df = cluster_df
-        exploratory_dfs.append(sampled_df)
-
-    exploratory_df = pd.concat(exploratory_dfs)
-    pool_X.drop(exploratory_df.index, inplace=True)  # Unselected entries
-
-    exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
-    labelled_X = exploratory_df
-    labelled_y = exploratory_df_labeled
-
-    n_extract_per_cluster_1 = 5
-
-    # Define thresholds
-    min_pos = 25
-    min_neg = 25
-    max_total = 200
-
-    while True:
-        positives = labelled_y["label_column"].astype(int).sum()
-        negatives = len(labelled_y) - positives
-
-        # stopping criteria
-        if (
-            (positives >= min_pos and negatives >= min_neg)
-            or pool_X.empty
-            or len(labelled_y) >= max_total
-        ):
-            break
-
-        # Identify clusters enriched in manual labeling "1" and "0"
-        enriched_clusters_1 = []
-        enriched_clusters_0 = []
-
-        for cluster in clusters:
-            cluster_indices = labelled_X[labelled_X["cluster"] == cluster].index
-            cluster_labels = labelled_y.loc[cluster_indices, "label_column"].astype(int)
-            if cluster_labels.sum() > len(cluster_labels) / 2:
-                enriched_clusters_1.append(cluster)
-            else:
-                enriched_clusters_0.append(cluster)
-
-        # If enriched_clusters_1 is empty, make the condition less strict
-        if not enriched_clusters_1:
-            for cluster in clusters:
-                cluster_indices = labelled_X[labelled_X["cluster"] == cluster].index
-                cluster_labels = labelled_y.loc[cluster_indices, "label_column"].astype(
-                    int
-                )
-                if cluster_labels.sum() > 0:
-                    enriched_clusters_1.append(cluster)
-
-        # Check if there's any positive or negative instance in the labeled data
-        unique_labels = labelled_y["label_column"].unique()
-
-        if len(unique_labels) == 1:
-            # Case: only positives or only negatives so far
-            selected_clusters = clusters.tolist()
-        else:
-            # Extract 5 instances from each enriched cluster
-            if len(enriched_clusters_1) > 0:
-                num_clusters_1 = len(enriched_clusters_1)
-                num_clusters_0 = min(len(enriched_clusters_0), num_clusters_1)
-
-                selected_clusters_0 = np.random.choice(
-                    enriched_clusters_0, num_clusters_0, replace=False
-                ).tolist()
-                selected_clusters = enriched_clusters_1 + selected_clusters_0
-            else:
-                selected_clusters = clusters.tolist()
-
-        exploratory_dfs = []
-        for cluster in selected_clusters:
-            cluster_df = pool_X[pool_X["cluster"] == cluster]
-            if len(cluster_df) >= n_extract_per_cluster_1:
-                sampled_df = cluster_df.sample(
-                    n=n_extract_per_cluster_1, random_state=42
-                )
-            else:
-                sampled_df = cluster_df
-            exploratory_dfs.append(sampled_df)
-
-        exploratory_df = pd.concat(exploratory_dfs)
-        pool_X = pool_X.drop(exploratory_df.index)
-
-        exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
-        labelled_X = pd.concat([labelled_X, exploratory_df], ignore_index=True)
-        labelled_y = pd.concat([labelled_y, exploratory_df_labeled], ignore_index=True)
-
-    # Check if we have only one class
-    labels_present = labelled_y["label_column"].unique()
-    if len(labels_present) < 2:
-        print(f"Warning: Only one class likely found: {labels_present}.")
-
-        # Return a dummy classifier
-        dummy_model = train_model(X_labeled.values, y_labeled.values, "dummy")
-        return dummy_model, pd.DataFrame(), pd.DataFrame()
-
-    # Balance train dataset
-    labelled_y = labelled_y.astype(int)
-    labelled_Xy = pd.concat([labelled_X, labelled_y], axis=1)
-    balanced_Xy, _ = balance_classes(labelled_Xy)
-
-    # Prepare datasets
-    X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
-    y_labeled = balanced_Xy["label_column"].astype(int)
-
-    # Check if there are instances of both classes in the labeled data
-    if len(y_labeled.unique()) < 2:
-        raise ValueError(
-            "Labeled data must contain instances of both classes (0 and 1)."
-        )
-
-    # Pre-active learning loop
-    initial_model = train_model(X_labeled.values, y_labeled.values, model_type)
-    X_certain, X_uncertain, pool_X = extract_uncertain_samples(
-        initial_model, pool_X, clusters, 10, skip_certain=False
+    # Label spreading
+    total_df = handle_pseudo_labels(
+        project_folder, subset_df, rois, layers, samples, "pseudo_labels.pkl"
     )
 
-    if not X_certain.empty:
-        y_certain = initial_model.predict(X_certain.drop(columns=["cluster"]).values)
-        y_certain_df = pd.DataFrame(
-            y_certain, index=X_certain.index, columns=["label_column"]
-        )
-        certain_Xy = pd.concat([X_certain, y_certain_df], axis=1)
-        labelled_Xy = pd.concat([labelled_Xy, certain_Xy], ignore_index=True)
+    # Prepare features and labels
+    print("Proceeding with the preliminar model...")
+    correct_prob = total_df.is_zero_prob == False
+    confident = total_df.myentropy < 0.025
+    mask = correct_prob & confident
 
-    y_uncertain = manual_labeling(X_uncertain, rois, layers)
-    uncertain_Xy = pd.concat([X_uncertain, y_uncertain], axis=1)
-    labelled_Xy = pd.concat([labelled_Xy, uncertain_Xy], ignore_index=True)
-    labelled_Xy["label_column"] = labelled_Xy["label_column"].astype(int)
+    raw_features = total_df.drop(
+        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+    ).values
+    raw_labels = total_df.labels.values.astype(int)
+    raw_clusters = total_df.cluster.values.astype(int)
 
-    # Split the labeled data into training and testing sets (80-20 split)
-    labelled_Xy_train, labelled_Xy_validation = train_test_split(
-        labelled_Xy, test_size=0.2, random_state=42, stratify=labelled_Xy["cluster"]
-    )
+    X = raw_features[mask]
+    y = raw_labels[mask]
+    clusters = raw_clusters[mask]
 
-    # Balance the newly labeled dataset and prepare for the next iteration
-    balanced_Xy, excluded_Xy = balance_classes(labelled_Xy_train)
+    # Split into train/test
+    length = len(X)
 
-    # Prepare the validation set
-    labelled_Xy_validation = pd.concat(
-        [labelled_Xy_validation, excluded_Xy], ignore_index=True
-    )
-    if len(labelled_Xy_validation) > 1000:
-        labelled_Xy_validation = labelled_Xy_validation.sample(n=1000, random_state=42)
-    X_validation = labelled_Xy_validation.drop(columns=["label_column", "cluster"])
-    y_validation = labelled_Xy_validation["label_column"].astype(int)
+    if length > 2000:
+        train_size = 1000 / length
 
-    # Active learning loop
-    iteration = 0
-    previous_performance = 0
-    best_performance = 0
-    best_iteration = 0
-    patience = 3
-    models_list = []
-    metrics_train_list = []
-    metrics_validation_list = []
-    certain_pool = pd.DataFrame()
-    uncertain_pool = pd.DataFrame()
-
-    while True:
-
-        iteration += 1  # Increment iteration count
-
-        if len(balanced_Xy) > 1000:
-            balanced_Xy = balanced_Xy.sample(n=1000, random_state=42)
-
-        X_labeled = balanced_Xy.drop(columns=["label_column", "cluster"])
-        y_labeled = balanced_Xy["label_column"].astype(int)
-
-        best_model = train_model(X_labeled.values, y_labeled.values, model_type)
-        models_list.append(best_model)
-
-        metrics_train = evaluate_model(best_model, X_labeled.values, y_labeled.values)
-        metrics_train_list.append(metrics_train)
-
-        metrics_validation = evaluate_model(
-            best_model, X_validation.values, y_validation.values
-        )
-        metrics_validation_list.append(metrics_validation)
-
-        if pool_X.empty:
-            break
-
-        if active_learning_bool == False:
-            break
-
-        print("Starting active learning loop...")
-        print(f"Optimizing the model based on {metric_to_optimize}")
-        print(f"Iteration {iteration}")
-
-        # Check if the improvement in performance is minimal
-        current_performance = metrics_validation[metric_to_optimize]
-        if current_performance <= best_performance:
-            patience -= 1
-            print(f"Current performance decreased to {current_performance}")
-            print(f"Patience left: {patience}")
-            if patience == 0:
-                print(f"Stopping the iteration due to divergence")
-                break
-        elif (current_performance - previous_performance) < 0.01:
-            patience -= 1
-            print(f"Current performance: {current_performance}")
-            print(
-                f"Minimal performance improvement ({current_performance - previous_performance})"
-            )
-            print(f"Patience left: {patience}")
-            if patience == 0:
-                print(f"Stopping the iteration due to minimal improvement")
-                break
-        else:
-            patience = 3  # Reset patience
-            print(f"Current performance: {current_performance}")
-
-        previous_performance = current_performance
-        if current_performance > best_performance:
-            best_performance = current_performance
-            best_iteration = iteration
-
-        # Predict and Extract (Least Confidence Sampling)
-        X_certain, X_uncertain, pool_X = extract_uncertain_samples(
-            best_model, pool_X, clusters, 5, skip_certain=True
+        # Initial split with proportional stratification
+        X_train, X_temp, y_train, y_temp, _, clusters_temp = train_test_split(
+            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
         )
 
-        # Combine the newly certain data with the previous dataset
-        if not X_certain.empty:
-            y_certain = best_model.predict(X_certain.drop(columns=["cluster"]).values)
-            y_certain_df = pd.DataFrame(
-                y_certain, index=X_certain.index, columns=["label_column"]
-            )
-            certain_Xy = pd.concat([X_certain, y_certain_df], axis=1)
-            certain_Xy["label_column"] = certain_Xy["label_column"].astype(int)
-            certain_pool = pd.concat([certain_pool, certain_Xy], ignore_index=True)
+        # Adjust the remaining temp data to ensure exactly 1000 samples for testing
+        test_size_adjusted = 1000 / len(X_temp)
+        X_test, _, y_test, _, _, _ = train_test_split(
+            X_temp,
+            y_temp,
+            clusters_temp,
+            train_size=test_size_adjusted,
+            random_state=42,
+            stratify=clusters_temp,
+        )
+    else:
+        # Standard 80-20 split
+        train_size = 0.8
+        X_train, X_test, y_train, y_test, _, _ = train_test_split(
+            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
+        )
 
-        if not certain_pool.empty:
-            balanced_certain, excluded_certain = balance_classes(certain_pool)
-            certain_pool = excluded_certain
-            if not balanced_certain.empty:
-                balanced_certain["label_column"] = balanced_certain[
-                    "label_column"
-                ].astype(int)
-                balanced_Xy = pd.concat(
-                    [balanced_Xy, balanced_certain], ignore_index=True
-                )
+    plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder)
 
-        # Combine the newly uncertain data with the previous dataset
-        if not X_uncertain.empty:
-            y_uncertain = manual_labeling(X_uncertain, rois, layers)
-            uncertain_Xy = pd.concat([X_uncertain, y_uncertain], axis=1)
-            uncertain_Xy["label_column"] = uncertain_Xy["label_column"].astype(int)
-            uncertain_pool = pd.concat(
-                [uncertain_pool, uncertain_Xy], ignore_index=True
-            )
+    # Train classifier
+    best_model = train_model(X_train, y_train, model_type)
 
-        if not uncertain_pool.empty:
-            balanced_uncertain, excluded_uncertain = balance_classes(uncertain_pool)
-            if not balanced_uncertain.empty:
-                balanced_uncertain["label_column"] = balanced_uncertain[
-                    "label_column"
-                ].astype(int)
-                balanced_Xy = pd.concat(
-                    [balanced_Xy, balanced_uncertain], ignore_index=True
-                )
-            if not excluded_uncertain.empty:
-                certain_pool = pd.concat(
-                    [certain_pool, excluded_uncertain], ignore_index=True
-                )
-                certain_pool["label_column"] = certain_pool["label_column"].astype(int)
-                balanced_mix, excluded_mix = balance_classes(certain_pool)
-                balanced_Xy = pd.concat([balanced_Xy, balanced_mix], ignore_index=True)
-                certain_pool = excluded_mix
+    # Evaluations
+    print(f"Proceeding with evaluating the {model_type} classifier...")
+    metrics_train = evaluate_model(best_model, X_train, y_train)
+    metrics_test = evaluate_model(best_model, X_test, y_test)
+    metrics_combined = pd.DataFrame({"Train": metrics_train, "Test": metrics_test})
+    print(metrics_combined)
 
-    # Export performance scores
-    performance_df_train = pd.DataFrame(metrics_train_list)
-    performance_df_validation = pd.DataFrame(metrics_validation_list)
-
-    # Roll back to the best model
-    if active_learning_bool == True:
-        best_model = models_list[best_iteration - 1]
-        print(f"Rolling back to the best model (iteration {best_iteration})")
-
-        # Plot the metrics
-        metrics = list(metrics_validation_list[0].keys())
-        _, axes = plt.subplots(len(metrics), 1, figsize=(12, 20))
-
-        for i, metric in enumerate(metrics):
-            axes[i].plot(
-                performance_df_train.index + 1,
-                performance_df_train[metric],
-                label="Training",
-                marker="o",
-            )
-            axes[i].plot(
-                performance_df_validation.index + 1,
-                performance_df_validation[metric],
-                label="Validation",
-                marker="o",
-            )
-            axes[i].set_xlabel("Iteration")
-            axes[i].set_ylim([0, 1])
-            axes[i].set_ylabel(metric)
-            axes[i].legend()
-            axes[i].grid()
-
-        plt.tight_layout()
-        plt.show()
-
-    return best_model, performance_df_train, performance_df_validation
+    return best_model, metrics_combined

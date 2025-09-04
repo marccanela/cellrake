@@ -11,7 +11,7 @@ from sklearn.base import BaseEstimator
 
 from cellrake.predicting import iterate_predicting
 from cellrake.segmentation import iterate_segmentation
-from cellrake.training import active_learning, create_subset_df
+from cellrake.training import create_subset_df, train_classifier
 
 
 class CellRake:
@@ -60,27 +60,19 @@ class CellRake:
             return self.segmented_data
 
     def train(
-        self,
-        threshold_rel: float = 0.1,
-        model_type: str = "rf",
-        metric_to_optimize: str = "f1_score",
-        active_learning_bool: bool = False,
+        self, threshold_rel: float = 0.1, model_type: str = "rf", samples: int = 10
     ):
         """
         Train a model using active learning on the segmented images.
         """
         seg = self.segment_images(threshold_rel)
-        subset_df = create_subset_df(seg["rois"], seg["layers"])
-        model, metrics_train, metrics_val = active_learning(
-            subset_df,
-            seg["rois"],
-            seg["layers"],
-            model_type,
-            metric_to_optimize,
-            active_learning_bool,
+        subset_df = create_subset_df(seg["rois"], seg["layers"], samples)
+
+        model, metrics_combined = train_classifier(
+            subset_df, seg["rois"], seg["layers"], samples, model_type, self.project_dir
         )
         self.model = model
-        self.metrics = {"train": metrics_train, "validation": metrics_val}
+        self.metrics = metrics_combined
         print("Model trained successfully.")
 
     def save_model(self, filename: str):

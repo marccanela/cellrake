@@ -5,15 +5,17 @@
 import math
 import pickle as pkl
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
 from skimage import draw, feature, filters, measure, morphology, segmentation
+from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from cellrake.utils import crop
+from cellrake.utils import crop, crop_cell_large
 
 
 def convert_to_roi(
@@ -58,40 +60,20 @@ def convert_to_roi(
 
 
 def iterate_segmentation(
-    image_folder: Path, threshold_rel: float, watershed: bool
+    image_folder: Path, threshold_rel: float
 ) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
-    """
-    This function iterates over all `.tif` files in the given `image_folder,` extracting all the potential regions of interest (ROIs) that may be positive.
-    The segmented layers and corresponding ROI data are stored in dictionaries with the image filename (without extension) as the key.
 
-    Parameters:
-    ----------
-    image_folder : pathlib.Path
-        A Path object pointing to the folder containing the `.tif` images to be segmented.
-    threshold_rel : float
-        Minimum intensity of peaks of Laplacian-of-Gaussian (LoG).
-        This should have a value between 0 and 1.
-
-    Returns:
-    -------
-    tuple[dict[str, dict], dict[str, numpy.ndarray]]
-        A tuple containing:
-        - `rois`: A dictionary where keys are image filenames and values are dictionaries of ROI data.
-        - `layers`: A dictionary where keys are image filenames and values are the corresponding segmented layers as NumPy arrays.
-    """
     rois = {}
     layers = {}
 
-    # Iterate over each .tif file and segment the image
     for tif_path in tqdm(
-        list(image_folder.glob("*.tif")), desc="Segmenting images", unit="image"
+        list(image_folder.glob("*.tif")), desc="Preprocessing images", unit="image"
     ):
-
-        # Segment the image
-        polygons, layer = segment_image(tif_path, threshold_rel, watershed)
-
-        # Store the results in the dictionaries
         tag = tif_path.stem
+        combined_array, layer = segment_image(tif_path, threshold_rel)
+        labels = measure.label(combined_array)
+        polygons = extract_polygons(labels)
+
         rois[tag] = convert_to_roi(polygons, layer)
         layers[tag] = layer
 
@@ -121,7 +103,7 @@ def export_rois(project_folder: Path, rois: Dict[str, Dict]) -> None:
             pkl.dump(rois_dict, file)
 
 
-def process_blob(layer: np.ndarray, blob: np.ndarray, watershed: bool) -> np.ndarray:
+def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
     """
     This function processes a single blob to create a binary mask based on Otsu's thresholding.
 
@@ -141,22 +123,23 @@ def process_blob(layer: np.ndarray, blob: np.ndarray, watershed: bool) -> np.nda
     # Extract the coordinates and radius from the blob
     y, x, r = blob
 
-    # Calculate the expanded radius
+    # Calculate the expanded radius and ensure blob stays within boundaries
     r = r * 1.5 * math.sqrt(2)
-
-    # Ensure the blob stays within the image boundaries
-    y = max(min(y, layer.shape[0] - r), r)
-    x = max(min(x, layer.shape[1] - r), r)
+    y = np.clip(y, r, layer.shape[0] - r)
+    x = np.clip(x, r, layer.shape[1] - r)
 
     # Create a circular disk mask based on the blob's location and radius
     rr, cc = draw.disk((y, x), r, shape=layer.shape)
     blob_mask = np.zeros(layer.shape, dtype=bool)
     blob_mask[rr, cc] = True
 
-    # Crop the blob_image to the bounding box of the mask
-    min_row, max_row = np.where(np.any(blob_mask, axis=1))[0][[0, -1]]
-    min_col, max_col = np.where(np.any(blob_mask, axis=0))[0][[0, -1]]
+    # Find the bounding box around the mask (row and column ranges)
+    rows = np.any(blob_mask, axis=1)
+    cols = np.any(blob_mask, axis=0)
+    min_row, max_row = np.where(rows)[0][[0, -1]]
+    min_col, max_col = np.where(cols)[0][[0, -1]]
 
+    # Crop the blob image to the bounding box
     cropped_blob_mask = blob_mask[min_row : max_row + 1, min_col : max_col + 1]
     cropped_blob_image = (
         layer[min_row : max_row + 1, min_col : max_col + 1] * cropped_blob_mask
@@ -171,35 +154,20 @@ def process_blob(layer: np.ndarray, blob: np.ndarray, watershed: bool) -> np.nda
     cropped_binary_image = cropped_blob_image > threshold
 
     # Clean binary image by deleting artifacts and closing holes
-    cleaned_cropped_list = clean_binary_image(cropped_binary_image, r)
-    if len(cleaned_cropped_list) == 0:
-        return None
+    cleaned = clean_binary_image(cropped_binary_image, r)
 
-    # Apply watershed segmentation of identify cells
-    if watershed:
-        labels_cropped_list = [
-            labels_cropped
-            for cleaned_cropped in cleaned_cropped_list
-            if (labels_cropped := apply_watershed_segmentation(cleaned_cropped))
-            is not None
-        ]
-    else:
-        labels_cropped_list = cleaned_cropped_list
-
-    if len(labels_cropped_list) == 0:
+    # Return None if cleaning fails
+    if cleaned is None:
         return None
 
     # Create a full-sized label image and place the cropped labels back into it
-    labels_list = [np.zeros(layer.shape, dtype=np.uint16) for _ in labels_cropped_list]
-    for i, labels_cropped in enumerate(labels_cropped_list):
-        labels_list[i][min_row : max_row + 1, min_col : max_col + 1] = labels_cropped
+    restored_image = np.zeros(layer.shape)
+    restored_image[min_row : max_row + 1, min_col : max_col + 1] = cleaned
 
-    return labels_list
+    return np.asarray(restored_image, dtype=bool)
 
 
-def create_combined_binary_image(
-    layer: np.ndarray, threshold_rel: float, watershed: bool
-) -> np.ndarray:
+def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.ndarray:
     """
     This function creates a combined binary image from detected blobs using Laplacian of Gaussian.
 
@@ -232,163 +200,233 @@ def create_combined_binary_image(
     # Process each blob to create a labelled mask
     binaries = []
     for blob in blobs_log:
-        result = process_blob(layer, blob, watershed)
+        result = process_blob(layer, blob)
         if result is not None:
-            if isinstance(result, list):
-                binaries.extend(result)
+            binaries.append(result)
 
-    if len(binaries) == 0:
-        return np.zeros_like(layer, dtype=np.uint8)
-
-    # Collect all labels and their sizes from all segment arrays
-    next_label = 1
-    label_dict = {}
-    for seg_array in binaries:
-        unique_labels = np.unique(seg_array[seg_array != 0])
-        for label in unique_labels:
-            mask = seg_array == label
-            size = np.sum(mask)
-            label_dict[next_label] = {"size": size, "seg_array": mask}
-            next_label += 1
-
-    # Sort labels by their size (biggest first)
-    sorted_labels = sorted(
-        label_dict.keys(), key=lambda l: label_dict[l]["size"], reverse=True
-    )
-
-    # Apply the labels to the combined_array in sorted order
-    combined_array = np.zeros_like(binaries[0], dtype=np.uint16)
-    for tag in sorted_labels:
-        mask = label_dict[tag]["seg_array"]
-        combined_array[mask] = tag
+    # Combine binaries into one single array
+    if len(binaries) > 0:
+        combined_array = np.bitwise_or.reduce(binaries)
+    else:
+        combined_array = np.zeros_like(layer, dtype=bool)
 
     return combined_array
 
 
 def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
-    """
-    This function cleans the binary image by removing small holes and retaining
-    all masks that are larger than 50% of the area of the largest mask.
 
-    Parameters:
-    ----------
-    binary_image : np.ndarray
-        The input binary image.
-    r : float
-        The radius used to create a disk for morphological operations.
+    min_disk_area = 60
+    max_disk_area = 2000
 
-    Returns:
-    -------
-    list
-        A list of binary masks for each valid label that are not too rectangular.
-    """
+    # Remove small objects
+    cleaned = morphology.remove_small_objects(binary_image, min_size=min_disk_area)
+
     # Remove small holes in the binary image
-    cleaned = morphology.remove_small_holes(
-        binary_image, area_threshold=np.sum(morphology.disk(int(r / 1.5)))
-    )
+    cleaned = morphology.remove_small_holes(cleaned, area_threshold=min_disk_area * 0.8)
 
-    # Label connected regions in the cleaned binary image
-    labeled_mask = measure.label(cleaned)
-
-    # Skip if there's only the background
-    if len(np.unique(labeled_mask)) == 1:
-        return []
-
-    # Calculate the properties of each labeled region
-    region_props = measure.regionprops(labeled_mask)
-
-    # Identify the largest area directly during iteration
-    max_area = max(region.area for region in region_props)
-
-    # Disk area for morphological operations
-    min_disk_area = np.sum(morphology.disk(4))
-
-    # Filter valid labels
-    valid_labels = [
-        region.label
-        for region in region_props
-        if region.area >= 0.5 * max_area and region.area >= min_disk_area
-    ]
-
-    # Create and validate masks for each valid label
-    masks = []
-
-    for label in valid_labels:
-        mask = labeled_mask == label
-
-        # Check if the mask is too rectangular
-        height, width = mask.shape
-        ellipse_area = np.pi * (width / 2) * (height / 2)
-        mask_area = np.sum(mask)
-        rect_area = height * width
-        area_difference = mask_area - ellipse_area
-
-        if area_difference <= 0.5 * (rect_area - ellipse_area):
-            masks.append(mask.astype(bool))
-
-    return masks
-
-
-def apply_watershed_segmentation(cleaned: np.ndarray) -> np.ndarray:
-    """
-    This function applies watershed segmentation to the cleaned binary image.
-
-    Parameters:
-    ----------
-    cleaned : np.ndarray
-        The cleaned binary image.
-
-    Returns:
-    -------
-    np.ndarray
-        The labeled image after applying watershed segmentation.
-    """
-    # Compute the Euclidean distance transform of the binary image
-    distance = distance_transform_edt(cleaned)
-    distance = filters.gaussian(distance, sigma=1.0)
-
-    # Calculate the cell radius from the maximum distance
-    cell_radius = int(np.max(distance))
-    if cell_radius == 0:
+    # Check minimum and maximum size
+    area = np.sum(cleaned)
+    if area < min_disk_area or area > max_disk_area:
         return None
 
-    # Create a disk for footprint
-    disk = morphology.disk(int(cell_radius))
+    return cleaned
 
-    # Identify local maxima in the distance map for marker generation
-    actual_area = np.sum(cleaned)
-    single_area = np.sum(disk)
-    predicted_peaks = actual_area / single_area
-    if predicted_peaks < 1.5:
-        return cleaned.astype(int)
 
-    predicted_peaks = int(predicted_peaks) + 1
+def preprocess_watershed(
+    combined_array: np.ndarray,
+    layer: np.ndarray,
+):
 
-    coords = feature.peak_local_max(
-        distance,
-        min_distance=cell_radius,
-        threshold_rel=0.6,
-        footprint=disk,
-        labels=measure.label(cleaned),
-        num_peaks_per_label=predicted_peaks,
+    labels = measure.label(combined_array)
+    unique_labels = np.unique(labels)
+    watershed_array = np.zeros_like(combined_array)
+
+    # Compute background intensity
+    background_mask = 1 - combined_array
+    background_pixels = layer[background_mask == 1]
+    nonzero_background_pixels = background_pixels[background_pixels != 0]
+    mean_background = np.mean(nonzero_background_pixels)
+
+    n = 1
+
+    for mylabel in unique_labels:
+        if mylabel == 0:
+            continue
+
+        cleaned = labels == mylabel
+
+        # Compute the Euclidean distance transform of the binary image
+        distance = distance_transform_edt(cleaned)
+        distance = filters.gaussian(distance, sigma=1.0)
+
+        # Calculate the cell radius from the maximum distance
+        cell_radius = int(np.max(distance))
+        if cell_radius == 0:
+            continue
+
+        # Check Signal-to-Background Ratio (SBR)
+        intensities = layer[cleaned]
+        blob_intensity = np.mean(intensities)
+        sbr = blob_intensity / (mean_background if mean_background != 0 else 1)
+        if sbr > 1.5:
+            watershed_array[cleaned] = n
+            n += 1
+            continue
+
+        # Create a disk for footprint
+        disk = morphology.disk(int(cell_radius))
+
+        # Identify local maxima in the distance map for marker generation
+        actual_area = np.sum(cleaned)
+        single_area = np.sum(disk)
+        predicted_peaks = actual_area / single_area
+        if predicted_peaks < 1.5:
+            watershed_array[cleaned] = n
+            n += 1
+            continue
+
+        predicted_peaks = int(predicted_peaks) + 1
+
+        coords = feature.peak_local_max(
+            distance,
+            min_distance=cell_radius,
+            threshold_rel=0.6,
+            footprint=disk,
+            labels=measure.label(cleaned),
+            num_peaks_per_label=predicted_peaks,
+        )
+
+        if len(coords) == 1:
+            watershed_array[cleaned] = n
+            n += 1
+            continue
+
+        # Extract coordinates
+        contours = measure.find_contours(cleaned, level=0.5)
+        largest_contour = max(contours, key=lambda c: len(c))
+        polygons = {1: largest_contour}
+        roi = convert_to_roi(polygons, layer)
+        roi_info = roi["roi_1"]
+
+        # User validation before segmentation
+        user_input_value = user_input_watershed(cleaned, layer, roi_info)
+
+        if user_input_value == 1:
+            watershed_array[cleaned] = n
+            n += 1
+            continue
+
+        # Perform watershed
+        coords = np.column_stack(np.nonzero(cleaned))
+        kmeans = KMeans(n_clusters=user_input_value, random_state=42)
+        kmeans.fit(coords)
+        markers = np.zeros_like(cleaned, dtype=int)
+        for i, coord in enumerate(coords):
+            markers[tuple(coord)] = (
+                kmeans.labels_[i] + 1
+            )  # Assign cluster IDs as marker labels
+        watershed_labels = segmentation.watershed(-distance, markers, mask=cleaned)
+
+        # Adjust the obtained numbers
+        unique_watershed_labels = np.unique(watershed_labels)
+        mapping = {}
+        for watershed_label in unique_watershed_labels:
+            if watershed_label != 0:
+                mapping[watershed_label] = n
+                n += 1
+
+        new_labels = np.vectorize(lambda x: mapping.get(x, 0))(watershed_labels)
+
+        watershed_array = np.where(new_labels == 0, watershed_array, new_labels)
+
+    return watershed_array
+
+
+def user_input_watershed(
+    cleaned: np.ndarray, layer: np.ndarray, roi_info: Dict[str, Any]
+):
+
+    print("Enter the number of ROIs to be segmented in.")
+    print("Please enter an integer different from zero (1, 2...):\n")
+
+    x_coords, y_coords = roi_info["x"], roi_info["y"]
+
+    # Set up the plot with four subplots
+    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
+
+    # Full image with ROI highlighted
+    axes[0].imshow(layer, cmap="viridis")
+    axes[0].plot(x_coords, y_coords, "b-", linewidth=1)
+    axes[0].axis("off")  # Hide the axis
+
+    # Full image without ROI highlighted
+    axes[1].imshow(layer, cmap="viridis")
+    axes[1].axis("off")  # Hide the axis
+
+    # Cropped image with padding, ROI highlighted
+    layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
+        layer, x_coords, y_coords, padding=120
     )
+    axes[2].imshow(layer_cropped_small, cmap="viridis")
+    axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
+    axes[2].axis("off")  # Hide the axis
 
-    if len(coords) == 1:
-        return cleaned.astype(int)
+    # Cropped image without ROI highlighted
+    axes[3].imshow(layer_cropped_small, cmap="viridis")
+    axes[3].axis("off")  # Hide the axis
 
-    # Create a mask for the local maxima
-    mask = np.zeros(cleaned.shape, dtype=bool)
-    mask[tuple(coords.T)] = True
+    plt.tight_layout()
+    plt.show()
+    plt.pause(0.1)
 
-    # Label the local maxima to generate markers for watershed
-    markers, _ = measure.label(mask, return_num=True)
+    # Ask for user input
+    while True:
+        try:
+            user_input_value = int(
+                input("Please enter an integer different from zero (1, 2...):\n")
+            )
+            if user_input_value != 0:
+                break
+            else:
+                print("Invalid input. Zero is not allowed.")
+        except ValueError:
+            print("Invalid input. Please enter a valid integer.")
 
-    # Apply the watershed algorithm using the distance map and markers
-    labels = segmentation.watershed(
-        -distance, markers, mask=cleaned, watershed_line=True, compactness=1
-    )
+    plt.close(fig)
 
-    return labels
+    return user_input_value
+
+
+def global_watershed(layer: np.ndarray):
+
+    print("Do you want to apply watershed in this image?")
+    print("Please enter yes (y) or no (n):\n")
+
+    # Set up the plot with four subplots
+    fig, ax = plt.subplots(1, 1, figsize=(4, 5))
+
+    # Full image without ROI highlighted
+    ax.imshow(layer, cmap="viridis")
+    ax.axis("off")  # Hide the axis
+
+    plt.tight_layout()
+    plt.show()
+    plt.pause(0.1)
+
+    # Ask for user input
+    while True:
+        try:
+            user_input_value = input("Please enter yes (y) or no (n):")
+            if user_input_value in ["y", "n"]:
+                break
+            else:
+                print("Invalid input. Please enter yes (y) or no (n).")
+        except ValueError:
+            print("Invalid input. Please enter yes (y) or no (n).")
+
+    plt.close(fig)
+
+    return user_input_value
 
 
 def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
@@ -406,10 +444,9 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
         A dictionary where keys are labels and values are lists of polygon coordinates.
     """
     polygons = {}
-    for label in np.unique(labels):
-        # Skip background
-        if label == 0:
-            continue
+    unique_labels = np.unique(labels)
+
+    for label in unique_labels[unique_labels > 0]:
 
         # Create a mask for the current label
         mask = labels == label
@@ -419,14 +456,14 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
 
         # If there are multiple contours, choose the largest one
         if contours:
-            largest_contour = max(contours, key=lambda c: len(c))
+            largest_contour = max(contours, key=len)
             polygons[label] = largest_contour
 
     return polygons
 
 
 def segment_image(
-    tif_path: Path, threshold_rel: float, watershed: bool
+    tif_path: Path, threshold_rel: float
 ) -> Tuple[Dict[int, List], np.ndarray]:
     """
     This function segments an image to identify and extract ROI polygons.
@@ -454,9 +491,6 @@ def segment_image(
     layer = layer.astype(np.uint8)
 
     # Create a binary image of the layer with the segmented cells
-    combined_array = create_combined_binary_image(layer, threshold_rel, watershed)
+    combined_array = create_combined_binary_image(layer, threshold_rel)
 
-    # Extract the coordinates of the segmented cells
-    polygons = extract_polygons(combined_array)
-
-    return polygons, layer
+    return combined_array, layer

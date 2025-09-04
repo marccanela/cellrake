@@ -2,7 +2,6 @@
 @author: Marc Canela
 """
 
-import pickle as pkl
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -14,7 +13,6 @@ from skimage.draw import polygon
 from skimage.feature import graycomatrix, graycoprops, hog, local_binary_pattern
 from skimage.measure import label, regionprops
 from sklearn.decomposition import PCA
-from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -28,6 +26,7 @@ from sklearn.model_selection import RandomizedSearchCV, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from tqdm import tqdm
 
 
 def export_data(data, project_folder, file_name):
@@ -603,22 +602,26 @@ def train_svm(
     pipeline_steps = [
         ("scaler", StandardScaler()),
         ("pca", PCA(n_components=0.95, random_state=42)),
-        ("svm", SVC(kernel="rbf", probability=True, random_state=42)),
+        (
+            "svm",
+            SVC(
+                kernel="rbf", probability=True, class_weight="balanced", random_state=42
+            ),
+        ),
     ]
     pipeline = Pipeline(pipeline_steps)
 
     # Define the distribution of hyperparameters for RandomizedSearchCV
     param_dist = {
         "svm__C": uniform(1, 100),  # Regularization parameter
-        "svm__gamma": uniform(0.001, 0.1),  # Kernel coefficient for RBF kernel
     }
 
     # Perform randomized search with cross-validation
     random_search = RandomizedSearchCV(
         pipeline,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
         verbose=0,
@@ -626,6 +629,45 @@ def train_svm(
     )
 
     # Fit the model to the training data
+    random_search.fit(X_train, y_train)
+
+    # Retrieve the best model from the random search
+    best_model = random_search.best_estimator_
+
+    return best_model
+
+
+def train_unbalanced(
+    X_train: np.ndarray, y_train: np.ndarray
+) -> Tuple[Pipeline, Dict[str, float]]:
+
+    class_weight = {0: 1, 1: 10}
+    rf = ExtraTreesClassifier(class_weight=class_weight, random_state=42)
+
+    # Define the hyperparameter grid
+    param_dist = {
+        "n_estimators": [int(x) for x in np.linspace(start=50, stop=500, num=10)],
+        "max_features": ["sqrt", "log2", None],
+        "max_depth": [int(x) for x in np.linspace(10, 100, num=10)] + [None],
+        "min_samples_split": [2, 5, 10, 15, 20],
+        "min_samples_leaf": [1, 2, 4, 8, 10],
+        "bootstrap": [True, False],
+        "criterion": ["gini", "entropy"],
+    }
+
+    # Set up RandomizedSearchCV
+    random_search = RandomizedSearchCV(
+        rf,
+        param_dist,
+        n_iter=50,
+        cv=3,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,  # Verbosity level for detailed output
+        error_score="raise",
+    )
+
+    # Fit RandomizedSearchCV to the data
     random_search.fit(X_train, y_train)
 
     # Retrieve the best model from the random search
@@ -657,9 +699,9 @@ def train_rf(
     """
 
     if model_type == "et":
-        rf = ExtraTreesClassifier(random_state=42)
+        rf = ExtraTreesClassifier(class_weight="balanced", random_state=42)
     else:
-        rf = RandomForestClassifier(random_state=42)
+        rf = RandomForestClassifier(class_weight="balanced", random_state=42)
 
     # Define the hyperparameter grid
     param_dist = {
@@ -676,11 +718,11 @@ def train_rf(
     random_search = RandomizedSearchCV(
         rf,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
-        verbose=0,
+        verbose=0,  # Verbosity level for detailed output
         error_score="raise",
     )
 
@@ -717,7 +759,7 @@ def train_logreg(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=0.95, random_state=42)),
-            ("log_reg", LogisticRegression(random_state=42)),
+            ("log_reg", LogisticRegression(class_weight="balanced", random_state=42)),
         ]
     )
 
@@ -730,11 +772,11 @@ def train_logreg(
     random_search = RandomizedSearchCV(
         pipeline,
         param_dist,
-        n_iter=100,
-        cv=5,
+        n_iter=50,
+        cv=3,
         random_state=42,
         n_jobs=-1,
-        verbose=0,
+        verbose=0,  # Verbosity level for detailed output
         error_score="raise",
     )
 
@@ -769,9 +811,6 @@ def train_model(X_labeled, y_labeled, model_type):
         best_model = train_rf(X_labeled, y_labeled, model_type)
     elif model_type == "logreg":
         best_model = train_logreg(X_labeled, y_labeled)
-    elif model_type == "dummy":
-        best_model = DummyClassifier(strategy="most_frequent")
-        best_model.fit(X_labeled, y_labeled)
 
     return best_model
 
@@ -796,7 +835,7 @@ def evaluate_model(best_model, X, y):
         - 'f1_score' (float): The F1 score.
     """
     # Get cross-validated predictions and probabilities
-    y_pred_proba = cross_val_predict(best_model, X, y, cv=5, method="predict_proba")
+    y_pred_proba = cross_val_predict(best_model, X, y, cv=3, method="predict_proba")
     y_pred = (y_pred_proba[:, 1] >= 0.5).astype(int)
     y_proba = y_pred_proba[:, 1]
 
@@ -865,38 +904,44 @@ def extract_uncertain_samples(
         uncert_dict = {k: v for k, v in uncert_dict.items() if v != 0}
 
     # Extract the top "n" most uncertain elements from each cluster
-    top_uncertain_indices = []
-    for cluster in clusters:
-        cluster_indices = pool_X.index[pool_X["cluster"] == cluster]
-        cluster_uncertainties = {
-            idx: uncert_dict[idx] for idx in cluster_indices if idx in uncert_dict
-        }
+    if n_extract_uncert_per_cluster != 0:
+        top_uncertain_indices = []
+        for cluster in clusters:
+            cluster_indices = pool_X.index[pool_X["cluster"] == cluster]
+            cluster_uncertainties = {
+                idx: uncert_dict[idx] for idx in cluster_indices if idx in uncert_dict
+            }
 
-        # No uncertainties in the cluster
-        if not cluster_uncertainties:
-            continue
+            # No uncertainties in the cluster
+            if not cluster_uncertainties:
+                continue
 
-        # Not enough samples in the cluster
-        elif len(cluster_uncertainties) < n_extract_uncert_per_cluster:
-            top_indices = list(cluster_uncertainties.keys())
+            # Not enough samples in the cluster
+            elif len(cluster_uncertainties) < n_extract_uncert_per_cluster:
+                top_indices = list(cluster_uncertainties.keys())
 
-        # Select the top highest values from cluster_uncertainties
-        else:
-            top_indices = sorted(
-                cluster_uncertainties,
-                key=cluster_uncertainties.get,
-                reverse=True,
-            )[:n_extract_uncert_per_cluster]
+            # Select the top highest values from cluster_uncertainties
+            else:
+                top_indices = sorted(
+                    cluster_uncertainties,
+                    key=cluster_uncertainties.get,
+                    reverse=True,
+                )[:n_extract_uncert_per_cluster]
 
-        top_uncertain_indices.extend(top_indices)
+            top_uncertain_indices.extend(top_indices)
 
-    # Extract the top uncertain samples from the pool
-    X_uncertain = pool_X.loc[top_uncertain_indices]
+        # Extract the top uncertain samples from the pool
+        X_uncertain = pool_X.loc[top_uncertain_indices]
 
-    # Remove the new uncertain data from the pool dataset
-    pool_X = pool_X.drop(
-        index=[idx for idx in top_uncertain_indices if idx in pool_X.index]
-    )
+        # Remove the new uncertain data from the pool dataset
+        pool_X = pool_X.drop(
+            index=[idx for idx in top_uncertain_indices if idx in pool_X.index]
+        )
+
+    else:
+        X_uncertain = None
+
+    # Remove certains from the pool
     pool_X = pool_X.drop(index=[idx for idx in certain_indices if idx in pool_X.index])
 
     return X_certain, X_uncertain, pool_X
