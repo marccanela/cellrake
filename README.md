@@ -64,9 +64,8 @@ pip install cellrake --upgrade
 
 For detailed tutorials and use cases, see the [examples](./examples) directory:
 
-- [Training Models](./examples/1_training_models.ipynb): Learn how to train a machine learning model using your dataset.
-- [Analyzing Images](./examples/2_analyzing_images.ipynb): Analyze new images using a pre-trained model.
-- [Colocalization Analysis](./examples/2_analyzing_images.ipynb): Perform colocalization analysis on multi-marker images.
+- Training Models: learn how to train a machine learning model using your dataset.
+- Analyzing Images: analyze new images using a pre-trained model.
 
 ## License
 

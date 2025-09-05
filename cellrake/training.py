@@ -459,39 +459,11 @@ def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_f
     plt.close()
 
 
-def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples, name):
-
-    label_speading_path = project_folder / name
-
-    if label_speading_path.exists():
-        print("Existing pseudo-labeled dataset detected.")
-        user_input = ""  # Initialize the variable to avoid unreferenced errors
-        while user_input not in ["y", "n"]:
-            user_input = input("Do you want to load it? (y/n): ").strip().lower()
-            if user_input == "y":
-                try:
-                    with open(label_speading_path, "rb") as file:
-                        total_df = pkl.load(file)
-                    print("Successfully loaded the existing pseudo-labeled dataset.")
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Error loading existing pseudo-labeled dataset: {e}"
-                    )
-                return total_df
-            elif user_input == "n":
-                print("Regenerating the pseudo-labeled dataset...")
-                break
-            else:
-                print("Invalid input. Please enter 'y' for yes or 'n' for no.")
-
-    else:
-        print("No existing pseudo-labeled dataset found. Generating a new one...")
+def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples):
 
     total_df = label_speading(subset_df, rois, layers, samples)
     plot_pca(total_df, project_folder)
-    with open(label_speading_path, "wb") as file:
-        pkl.dump(total_df, file)
-    print("Pseudo-labeled dataset generated and saved.")
+    print("Pseudo-labeled dataset generated.")
     return total_df
 
 
@@ -538,9 +510,7 @@ def train_classifier(
         The best estimator found by active learning and a DataFrame with performance metrics.
     """
     # Label spreading
-    total_df = handle_pseudo_labels(
-        project_folder, subset_df, rois, layers, samples, "pseudo_labels.pkl"
-    )
+    total_df = handle_pseudo_labels(project_folder, subset_df, rois, layers, samples)
 
     # Prepare features and labels
     print("Proceeding with the preliminar model...")
