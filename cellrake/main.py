@@ -84,7 +84,7 @@ class CellRake:
 
         with open(self.project_dir / f"{filename}.pkl", "wb") as file:
             pkl.dump(self.model, file)
-        print(f"Model saved as {self.project_dir.stem / f'{filename}.pkl'}")
+        print(f"Model saved as {filename}.pkl")
 
     def load_model(self, filename: str):
         """Load a trained model from disk."""
@@ -107,7 +107,7 @@ class CellRake:
 
         with open(self.project_dir / f"{filename}.pkl", "wb") as file:
             pkl.dump(self.segmented_data, file)
-        print(f"Segmentation saved as {self.project_dir.stem / f'{filename}.pkl'}")
+        print(f"Segmentation saved as {filename}.pkl")
 
     def load_segmentation(self, filename: str):
         """Load segmented data from disk."""
