@@ -24,21 +24,18 @@ from sklearn.model_selection import RandomizedSearchCV, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from tqdm import tqdm
 
 
-def export_data(data, project_folder, file_name):
+def export_data(data: pd.DataFrame, project_folder: Path, file_name: str) -> None:
     """
-    Saves data to CSV and Excel files in the specified project folder.
+    Save data to CSV and Excel files in the specified project folder.
 
-    Parameters:
+    Parameters
     ----------
     data : pd.DataFrame
         Data to save.
-
     project_folder : Path
         Folder to save the files.
-
     file_name : str
         Base name of the files (without extensions).
     """
@@ -48,26 +45,19 @@ def export_data(data, project_folder, file_name):
 
 def get_cell_mask(layer: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
     """
-    This function generates a binary mask where the specified ROI regions,
-    defined by polygonal coordinates, are filled with ones (1). All other
-    areas in the mask are set to zeros (0). The dimensions of the mask match
-    the dimensions of the input image layer.
+    Generate a binary mask for ROI regions defined by polygonal coordinates.
 
-    Parameters:
+    Parameters
     ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of this array
-        (height, width) determines the dimensions of the resulting mask.
+    layer : np.ndarray
+        2D image layer determining mask dimensions.
+    coordinates : np.ndarray
+        Array of shape (N, 2) representing polygon vertices defining ROI.
 
-    coordinates : list of numpy.ndarray
-        A NumPy array of shape (N, 2) that represents the vertices of a polygon
-        that defines a ROI. This polygon specifies the area to be filled in the mask.
-
-    Returns:
+    Returns
     -------
-    numpy.ndarray
-        A binary mask of the same shape as `layer`. Pixels within the defined
-        polygonal regions are set to `1`, and all other pixels are set to `0`.
+    np.ndarray
+        Binary mask with ROI pixels set to 1, others to 0.
     """
 
     mask = np.zeros(layer.shape, dtype=np.uint8)
@@ -91,29 +81,21 @@ def crop_cell(
     y_coords: Union[List[int], np.ndarray],
 ) -> np.ndarray:
     """
-    This function extracts a rectangular subregion from the provided image `layer`.
-    The rectangle is defined by the minimum and maximum x and y coordinates.
-    The subregion is extracted by slicing the `layer` array.
+    Extract a rectangular subregion from an image layer.
 
-    Parameters:
+    Parameters
     ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer from which the region is to be cropped.
-        The shape of the array should be (height, width).
+    layer : np.ndarray
+        2D image layer to crop from.
+    x_coords : Union[List[int], np.ndarray]
+        X-coordinates defining horizontal crop boundaries.
+    y_coords : Union[List[int], np.ndarray]
+        Y-coordinates defining vertical crop boundaries.
 
-    x_coords : list or numpy.ndarray
-        A list or array of x-coordinates defining the horizontal extent of the rectangular region to crop.
-        The function calculates the minimum and maximum x-coordinates to determine the horizontal boundaries.
-
-    y_coords : list or numpy.ndarray
-        A list or array of y-coordinates defining the vertical extent of the rectangular region to crop.
-        The function calculates the minimum and maximum y-coordinates to determine the vertical boundaries.
-
-    Returns:
+    Returns
     -------
-    numpy.ndarray
-        A 2D NumPy array representing the cropped region of the image layer. The dimensions of the
-        cropped region are determined by the min and max x and y coordinates.
+    np.ndarray
+        Cropped rectangular region from the image layer.
     """
     # Extract min and max coordinates and convert to integers
     x_min, x_max = int(min(x_coords)), int(max(x_coords))
@@ -127,49 +109,20 @@ def extract_roi_stats(
     layer: np.ndarray, roi_info: Dict[str, Any]
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
-    This function computes a binary mask for the ROI, crops the image and mask to
-    the bounding box of the ROI, and calculates a range of statistical and texture
-    features from the cropped and masked region.
+    Extract statistical and texture features from a region of interest (ROI).
 
-    Parameters:
+    Parameters
     ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape should be (height, width).
+    layer : np.ndarray
+        2D image layer for feature extraction.
+    roi_info : Dict[str, Any]
+        Dictionary with ROI coordinates containing "x" and "y" keys.
 
-    roi_info : dict
-        A dictionary containing the coordinates of the ROI with the following keys:
-        - "x": A list or array of x-coordinates of the ROI vertices.
-        - "y": A list or array of y-coordinates of the ROI vertices.
-
-    Returns:
+    Returns
     -------
-    cell_mask : numpy.ndarray
-        A binary 2D NumPy array with the same size as `layer`, where pixels within the ROI are set to 1.
-
-    stats_dict : dict
-        A dictionary containing various statistical and texture features extracted from the ROI:
-        - "mean_intensity": Mean pixel intensity within the ROI.
-        - "median_intensity": Median pixel intensity within the ROI.
-        - "sd_intensity": Standard deviation of pixel intensities within the ROI.
-        - "min_intensity": Minimum pixel intensity within the ROI.
-        - "max_intensity": Maximum pixel intensity within the ROI.
-        - "mean_ratio": Ratio of mean intensity of the ROI to the background.
-        - "mean_difference": Difference between mean intensity of the ROI and the background.
-        - "lbp_mean": Mean Local Binary Pattern (LBP) value within the ROI.
-        - "lbp_std": Standard deviation of LBP values within the ROI.
-        - "contrast": Contrast from the Gray Level Co-occurrence Matrix (GLCM).
-        - "correlation": Correlation from the GLCM.
-        - "energy": Energy from the GLCM.
-        - "homogeneity": Homogeneity from the GLCM.
-        - "area": Area of the ROI.
-        - "perimeter": Perimeter of the ROI.
-        - "eccentricity": Eccentricity of the ROI.
-        - "major_axis_length": Length of the major axis of the ROI.
-        - "minor_axis_length": Length of the minor axis of the ROI.
-        - "solidity": Solidity of the ROI.
-        - "extent": Extent of the ROI.
-        - "hog_mean": Mean Histogram of Oriented Gradients (HOG) descriptor value.
-        - "hog_std": Standard deviation of the HOG descriptor values.
+    Tuple[np.ndarray, Dict[str, Any]]
+        Binary mask and dictionary of extracted features including intensity,
+        texture, and morphological statistics.
     """
     # Extract ROI coordinates from the dictionary
     x_coords, y_coords = roi_info["x"], roi_info["y"]
@@ -289,23 +242,19 @@ def create_stats_dict(
     roi_dict: Dict[str, Dict[str, Any]], layer: np.ndarray
 ) -> Dict[str, Dict[str, Any]]:
     """
-    This function calculates features for each ROI, combines the results, and computes additional statistics
-    based on the entire set of ROIs, including background statistics.
+    Calculate features for multiple ROIs with background statistics.
 
-    Parameters:
+    Parameters
     ----------
-    roi_dict : dict
-        A dictionary where each key is a name for a ROI and each value is another dictionary containing
-        the coordinates of the ROI with keys "x" and "y".
+    roi_dict : Dict[str, Dict[str, Any]]
+        Dictionary mapping ROI names to coordinate dictionaries.
+    layer : np.ndarray
+        2D image layer for feature extraction.
 
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer from which the ROIs are extracted. The shape should be (height, width).
-
-    Returns:
+    Returns
     -------
-    dict
-        A dictionary with ROI names as keys and dictionaries of statistical features as values. Each features dictionary
-        includes computed statistics for each ROI, including additional ratios and differences.
+    Dict[str, Dict[str, Any]]
+        Dictionary with ROI names as keys and feature dictionaries as values.
     """
     cell_masks = []
     roi_props = {}
@@ -360,31 +309,23 @@ def crop_cell_large(
     padding: Optional[int] = None,
 ) -> Tuple[np.ndarray, List[float], List[float]]:
     """
-    This function extracts a subregion from the image `layer` based on the provided x and y coordinates
-    and adjusts these coordinates relative to the cropped image. Padding can be applied to extend the
-    crop area beyond the bounding box of the ROI.
+    Extract a padded subregion from an image layer with coordinate adjustment.
 
-    Parameters:
+    Parameters
     ----------
-    layer : numpy.ndarray
-        A 2D or 3D NumPy array representing the image layer. The shape should be (height, width) or (height, width, channels).
+    layer : np.ndarray
+        2D or 3D image layer to crop from.
+    x_coords : List[float]
+        X-coordinates defining the crop boundary.
+    y_coords : List[float]
+        Y-coordinates defining the crop boundary.
+    padding : Optional[int]
+        Padding to add around crop area. If None, uses ROI dimensions.
 
-    x_coords : list of float
-        A list of x-coordinates defining the boundary of the rectangular region to crop.
-
-    y_coords : list of float
-        A list of y-coordinates defining the boundary of the rectangular region to crop.
-
-    padding : int or None, optional
-        An integer value specifying the amount of padding to add to the crop area. If None, padding
-        will be set to the width or height of the bounding box of the ROI. Defaults to None.
-
-    Returns:
+    Returns
     -------
     Tuple[np.ndarray, List[float], List[float]]
-        - The cropped image layer as a NumPy array.
-        - The x-coordinates adjusted to the cropped image.
-        - The y-coordinates adjusted to the cropped image.
+        Cropped image layer and adjusted coordinates.
     """
     # Determine cropping boundaries
     x_min, x_max = int(min(x_coords)), int(max(x_coords))
@@ -423,19 +364,17 @@ def crop_cell_large(
 
 def fix_polygon(polygon: Polygon) -> Polygon:
     """
-    This function checks if the provided polygon is valid. If it is not valid, it attempts to fix the polygon by
-    applying a buffer with a width of zero. If the polygon is still invalid after this operation, a message is printed
-    and `None` is returned.
+    Validate and fix invalid polygons using buffer operations.
 
-    Parameters:
+    Parameters
     ----------
-    polygon : shapely.geometry.Polygon
-        The input polygon that needs validation and potential correction.
+    polygon : Polygon
+        Input polygon to validate and potentially fix.
 
-    Returns:
+    Returns
     -------
-    shapely.geometry.Polygon or None
-        A valid polygon if the correction was successful, or `None` if the polygon could not be fixed.
+    Polygon
+        Valid polygon or None if correction failed.
     """
     if not polygon.is_valid:
         # Attempt to fix the polygon by applying a zero-width buffer
@@ -451,17 +390,17 @@ def fix_polygon(polygon: Polygon) -> Polygon:
 
 def crop(layer: np.ndarray) -> np.ndarray:
     """
-    This function trims the input image layer to remove any rows or columns that contain only zero values.
+    Remove rows and columns containing only zero values from image layer.
 
-    Parameters:
+    Parameters
     ----------
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer. The shape of the array should be (height, width).
+    layer : np.ndarray
+        2D image layer to trim.
 
-    Returns:
+    Returns
     -------
-    numpy.ndarray
-        The cropped image layer with zero-only rows and columns removed.
+    np.ndarray
+        Cropped image layer with zero-only rows and columns removed.
     """
     # Remove rows that are entirely zeros
     layer = layer[~np.all(layer == 0, axis=1)]
@@ -472,23 +411,21 @@ def crop(layer: np.ndarray) -> np.ndarray:
     return layer
 
 
-def train_svm(
-    X_train: np.ndarray, y_train: np.ndarray
-) -> Tuple[Pipeline, Dict[str, float]]:
+def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     """
-    This function trains an SVM model with hyperparameter tuning using RandomizedSearchCV
+    Train an SVM model with hyperparameter tuning using RandomizedSearchCV.
 
-    Parameters:
+    Parameters
     ----------
     X_train : np.ndarray
-        The training features, a 2D array where each row is a sample and each column is a feature.
-
+        Training features array.
     y_train : np.ndarray
-        The training labels, a 1D array where each element is the label for the corresponding sample in X_train.
+        Training labels array.
 
-    Returns:
+    Returns
     -------
-    best_model: The best estimator found by the random search, ready for prediction.
+    Pipeline
+        Best SVM estimator found by random search.
     """
 
     # Create a pipeline with scaling, PCA, and SVM
@@ -532,24 +469,23 @@ def train_svm(
 
 def train_rf(
     X_train: np.ndarray, y_train: np.ndarray, model_type: str = "rf"
-) -> Tuple[RandomForestClassifier, Dict[str, float]]:
+) -> Union[RandomForestClassifier, ExtraTreesClassifier]:
     """
-    This function trains a Random Forest Classifier or Extra Trees Classifier with hyperparameter tuning using RandomizedSearchCV
+    Train a Random Forest or Extra Trees classifier with hyperparameter tuning.
 
-    Parameters:
+    Parameters
     ----------
     X_train : np.ndarray
-        The training features, typically a 2D array where each row represents a sample and each column represents a feature.
-
+        Training features array.
     y_train : np.ndarray
-        The training labels, typically a 1D array where each element is the label for the corresponding sample in X_train.
+        Training labels array.
+    model_type : str
+        Model type: 'rf' for Random Forest or 'et' for Extra Trees.
 
-    model_type : str, optional
-        The type of model to train. Options are 'rf' (Random Forest) or 'et' (Extra Trees). Default is 'rf'.
-
-    Returns:
+    Returns
     -------
-    best_model: The best estimator found by the random search, which is a RandomForestClassifier or ExtraTreesClassifier.
+    Union[RandomForestClassifier, ExtraTreesClassifier]
+        Best estimator found by random search.
     """
 
     if model_type == "et":
@@ -589,23 +525,21 @@ def train_rf(
     return best_model
 
 
-def train_logreg(
-    X_train: np.ndarray, y_train: np.ndarray
-) -> Tuple[Pipeline, Dict[str, float]]:
+def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
     """
-    This function trains a Logistic Regression model with hyperparameter tuning using RandomizedSearchCV
+    Train a Logistic Regression model with hyperparameter tuning.
 
-    Parameters:
+    Parameters
     ----------
     X_train : np.ndarray
-        The training features, typically a 2D array where each row represents a sample and each column represents a feature.
-
+        Training features array.
     y_train : np.ndarray
-        The training labels, typically a 1D array where each element is the label for the corresponding sample in X_train.
+        Training labels array.
 
-    Returns:
+    Returns
     -------
-    best_model: The best estimator found by the random search, which is a Pipeline containing PCA and LogisticRegression.
+    Pipeline
+        Best estimator pipeline with PCA and LogisticRegression.
     """
 
     # Define the pipeline
@@ -643,21 +577,25 @@ def train_logreg(
     return best_model
 
 
-def train_model(X_labeled, y_labeled, model_type):
+def train_model(
+    X_labeled: np.ndarray, y_labeled: np.ndarray, model_type: str
+) -> Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier]:
     """
-    Trains a machine learning model based on the specified model type.
+    Train a machine learning model based on the specified model type.
 
-    Parameters:
+    Parameters
     ----------
-    X_labeled (pd.DataFrame): The labeled feature data.
-    y_labeled (pd.Series): The labeled target data.
-    model_type (str): The type of model to train. Options are "svm" for Support Vector Machine,
-    "rf" for Random Forest, "et" for Extra Trees, and "logreg" for Logistic Regression.
+    X_labeled : np.ndarray
+        Labeled feature data.
+    y_labeled : np.ndarray
+        Labeled target data.
+    model_type : str
+        Model type: "svm", "rf", "et", or "logreg".
 
-    Returns:
-    ----------
-    best_model: The trained machine learning model.
-    metrics: A dictionary containing evaluation metrics for the model.
+    Returns
+    -------
+    Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier]
+        Trained machine learning model.
     """
     if model_type == "svm":
         best_model = train_svm(X_labeled, y_labeled)
@@ -669,24 +607,27 @@ def train_model(X_labeled, y_labeled, model_type):
     return best_model
 
 
-def evaluate_model(best_model, X, y):
+def evaluate_model(
+    best_model: Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier],
+    X: np.ndarray,
+    y: np.ndarray,
+) -> Dict[str, float]:
     """
-    Evaluate the performance of a given model using cross-validated predictions.
+    Evaluate model performance using cross-validated predictions.
 
-    Parameters:
+    Parameters
     ----------
-    best_model (sklearn.base.BaseEstimator): The model to be evaluated.
-    X (pd.DataFrame or np.ndarray): The feature matrix.
-    y (pd.Series or np.ndarray): The target vector.
+    best_model : Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier]
+        Model to be evaluated.
+    X : np.ndarray
+        Feature matrix.
+    y : np.ndarray
+        Target vector.
 
-    Returns:
-    ----------
-    dict: A dictionary containing the following metrics:
-        - 'roc_auc' (float): The ROC AUC score.
-        - 'ap' (float): The average precision score.
-        - 'precision' (float): The precision score.
-        - 'recall' (float): The recall score.
-        - 'f1_score' (float): The F1 score.
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing evaluation metrics: roc_auc, ap, precision, recall, f1_score.
     """
     # Get cross-validated predictions and probabilities
     y_pred_proba = cross_val_predict(best_model, X, y, cv=3, method="predict_proba")
