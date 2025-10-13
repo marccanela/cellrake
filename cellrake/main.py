@@ -3,7 +3,7 @@
 import math
 import pickle as pkl
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Union
 
 import pandas as pd
 from sklearn.base import BaseEstimator
@@ -14,174 +14,153 @@ from cellrake.training import create_subset_df, train_classifier
 
 
 class CellRake:
+    """
+    A cell analysis pipeline for image segmentation, training, and analysis.
+    """
 
     def __init__(
         self,
-        image_folder: Path,
         project_dir: Path,
-        segmented_data: dict = None,
-        # Segmentation hyperparameters
-        max_sigma: int = 15,
-        num_sigma: int = 10,
-        overlap: float = 0,
-        radius_expansion: float = 1.5 * math.sqrt(2),
-        min_area: int = 60,
-        max_area: int = 2000,
-        hole_fill_ratio: float = 0.8,
-        contour_level: float = 0.5,
-        # Training hyperparameters
-        clusters: int = 2,
-        pca_variance_ratio: float = 0.95,
-        entropy_threshold: float = 0.025,
-        max_train_samples: int = 1000,
-        max_test_samples: int = 1000,
-        dataset_size_threshold: int = 2000,
-        default_train_ratio: float = 0.8,
-        smote_strategy: str = "minority",
-        label_spreading_kernel: str = "knn",
-        plot_entropy_threshold: float = 0.2,
-        plot_dpi: int = 300,
-        random_state: int = 42,
+        image_folder: Optional[Path] = None,
+        segmented_data: Optional[dict] = None,
     ):
         """
         Initialize a CellRake object.
 
         Parameters
         ----------
-        image_folder : Path
-            Folder containing TIFF images.
         project_dir : Path
             Directory to save models and results.
+        image_folder : Path, optional
+            Folder containing TIFF images.
         segmented_data : dict, optional
-            Already segmented ROIs and layers (from a saved segmentation).
+            Pre-segmented ROIs and layers data.
+        """
+        # Validate and setup directories
+        project_dir = Path(project_dir)
+        project_dir.mkdir(parents=True, exist_ok=True)
 
-        Segmentation Parameters
-        ----------------------
-        max_sigma : int, default=15
+        if image_folder is not None:
+            image_folder = Path(image_folder)
+            if not image_folder.exists():
+                raise FileNotFoundError(f"Image folder does not exist: {image_folder}")
+
+        # Core instance variables
+        self.image_folder: Optional[Path] = image_folder
+        self.segmented_data: Optional[Dict] = segmented_data
+        self.project_dir: Path = project_dir
+        self.model: Optional[BaseEstimator] = None
+        self.metrics: Optional[Dict] = None
+        self.counts: Optional[pd.DataFrame] = None
+        self.features: Optional[pd.DataFrame] = None
+
+    def segment_images(
+        self,
+        threshold_rel: float,
+        # Segmentation parameters - all optional, will use function defaults if not provided
+        max_sigma: Optional[int] = None,
+        num_sigma: Optional[int] = None,
+        overlap: Optional[float] = None,
+        radius_expansion: Optional[float] = None,
+        min_area: Optional[int] = None,
+        max_area: Optional[int] = None,
+        hole_fill_ratio: Optional[float] = None,
+        contour_level: Optional[float] = None,
+    ) -> dict:
+        """
+        Run segmentation on images in image_folder.
+
+        Parameters
+        ----------
+        threshold_rel : float
+            Threshold for blob detection (0-1).
+        max_sigma : int, optional
             Maximum standard deviation for LoG filter.
-        num_sigma : int, default=10
+        num_sigma : int, optional
             Number of intermediate values for LoG filter.
-        overlap : float, default=0
+        overlap : float, optional
             Minimum distance between blobs as fraction of radius.
-        radius_expansion : float, default=1.5*sqrt(2)
+        radius_expansion : float, optional
             Factor to expand blob radius for mask creation.
-        min_area : int, default=60
+        min_area : int, optional
             Minimum object area for cleaning.
-        max_area : int, default=2000
+        max_area : int, optional
             Maximum object area for cleaning.
-        hole_fill_ratio : float, default=0.8
+        hole_fill_ratio : float, optional
             Ratio for hole filling threshold.
-        contour_level : float, default=0.5
+        contour_level : float, optional
             Level for contour extraction.
 
-        Training Parameters
-        ------------------
-        clusters : int, default=2
-            Number of clusters for grouping features.
-        pca_variance_ratio : float, default=0.95
-            Proportion of variance to retain in PCA dimensionality reduction.
-        entropy_threshold : float, default=0.025
-            Confidence threshold for pseudo-label selection based on entropy.
-        max_train_samples : int, default=1000
-            Maximum number of training samples when dataset is large.
-        max_test_samples : int, default=1000
-            Maximum number of testing samples when dataset is large.
-        dataset_size_threshold : int, default=2000
-            Dataset size above which to use fixed sample limits.
-        default_train_ratio : float, default=0.8
-            Training ratio for standard train/test split on smaller datasets.
-        smote_strategy : str, default="minority"
-            SMOTE sampling strategy for handling class imbalance.
-        label_spreading_kernel : str, default="knn"
-            Kernel type for label spreading algorithm.
-        plot_entropy_threshold : float, default=0.2
-            Entropy threshold for plot visualization confidence.
-        plot_dpi : int, default=300
-            DPI resolution for saved plots.
-        random_state : int, default=42
-            Random seed for reproducibility.
-        """
-        self.image_folder: Path = image_folder
-        self.segmented_data: Dict = segmented_data
-        self.project_dir: Path = project_dir
-        self.model: BaseEstimator = None
-        self.metrics: Dict = None
-        self.counts: pd.DataFrame = None
-        self.features: pd.DataFrame = None
-
-        # Segmentation parameters
-        self.max_sigma = max_sigma
-        self.num_sigma = num_sigma
-        self.overlap = overlap
-        self.radius_expansion = radius_expansion
-        self.min_area = min_area
-        self.max_area = max_area
-        self.hole_fill_ratio = hole_fill_ratio
-        self.contour_level = contour_level
-
-        # Training parameters
-        self.clusters = clusters
-        self.pca_variance_ratio = pca_variance_ratio
-        self.entropy_threshold = entropy_threshold
-        self.max_train_samples = max_train_samples
-        self.max_test_samples = max_test_samples
-        self.dataset_size_threshold = dataset_size_threshold
-        self.default_train_ratio = default_train_ratio
-        self.smote_strategy = smote_strategy
-        self.label_spreading_kernel = label_spreading_kernel
-        self.plot_entropy_threshold = plot_entropy_threshold
-        self.plot_dpi = plot_dpi
-        self.random_state = random_state
-
-    def segment_images(self, threshold_rel: float):
-        """
-        Run segmentation on the images in `image_folder`.
-        If `segmented_data` exists, reuse it.
+        Returns
+        -------
+        dict
+            Dictionary containing 'rois' and 'layers' data.
         """
         if self.segmented_data is not None:
             print("Using pre-segmented data.")
             return self.segmented_data
 
-        else:
-            if self.image_folder is None:
-                raise ValueError("Please, define image_folder before segment_images.")
+        if self.image_folder is None:
+            raise ValueError("image_folder must be defined before segmentation.")
 
-            rois, layers = iterate_segmentation(
-                self.image_folder,
-                threshold_rel,
-                self.max_sigma,
-                self.num_sigma,
-                self.overlap,
-                self.radius_expansion,
-                self.min_area,
-                self.max_area,
-                self.hole_fill_ratio,
-                self.contour_level,
-            )
-            self.segmented_data = {"rois": rois, "layers": layers}
-            return self.segmented_data
+        # Build segmentation arguments - only include non-None parameters
+        seg_args = {
+            "image_folder": self.image_folder,
+            "threshold_rel": threshold_rel,
+        }
+
+        # Add optional parameters if provided
+        if max_sigma is not None:
+            seg_args["max_sigma"] = max_sigma
+        if num_sigma is not None:
+            seg_args["num_sigma"] = num_sigma
+        if overlap is not None:
+            seg_args["overlap"] = overlap
+        if radius_expansion is not None:
+            seg_args["radius_expansion"] = radius_expansion
+        if min_area is not None:
+            seg_args["min_area"] = min_area
+        if max_area is not None:
+            seg_args["max_area"] = max_area
+        if hole_fill_ratio is not None:
+            seg_args["hole_fill_ratio"] = hole_fill_ratio
+        if contour_level is not None:
+            seg_args["contour_level"] = contour_level
+
+        rois, layers = iterate_segmentation(**seg_args)
+        self.segmented_data = {"rois": rois, "layers": layers}
+        return self.segmented_data
 
     def train(
         self,
         threshold_rel: float = 0.1,
         model_type: str = "rf",
         samples: int = 10,
-        # Optional parameter overrides
-        clusters: int = None,
-        pca_variance_ratio: float = None,
-        entropy_threshold: float = None,
-        max_train_samples: int = None,
-        max_test_samples: int = None,
-        dataset_size_threshold: int = None,
-        default_train_ratio: float = None,
-        smote_strategy: str = None,
-        label_spreading_kernel: str = None,
-        plot_entropy_threshold: float = None,
-        plot_dpi: int = None,
-        random_state: int = None,
-    ):
+        # Segmentation parameters (if you want to use different segmentation for training)
+        max_sigma: Optional[int] = None,
+        num_sigma: Optional[int] = None,
+        overlap: Optional[float] = None,
+        radius_expansion: Optional[float] = None,
+        min_area: Optional[int] = None,
+        max_area: Optional[int] = None,
+        hole_fill_ratio: Optional[float] = None,
+        contour_level: Optional[float] = None,
+        # Training parameters
+        clusters: Optional[int] = None,
+        pca_variance_ratio: Optional[float] = None,
+        entropy_threshold: Optional[float] = None,
+        max_train_samples: Optional[int] = None,
+        max_test_samples: Optional[int] = None,
+        dataset_size_threshold: Optional[int] = None,
+        default_train_ratio: Optional[float] = None,
+        smote_strategy: Optional[str] = None,
+        label_spreading_kernel: Optional[str] = None,
+        plot_entropy_threshold: Optional[float] = None,
+        plot_dpi: Optional[int] = None,
+        random_state: Optional[int] = None,
+    ) -> None:
         """
-        Train a model using semi-supervised learning on the segmented images.
+        Train a classification model using semi-supervised learning.
 
         Parameters
         ----------
@@ -191,172 +170,349 @@ class CellRake:
             Type of model to train ('svm', 'rf', 'et', or 'logreg').
         samples : int, default=10
             Number of samples to draw from each cluster for initial labeling.
-
-        All other parameters are optional overrides of the instance defaults.
-        If provided, they will update the instance values permanently.
-        If not provided, the values from __init__ will be used.
+        max_sigma : int, optional
+            Maximum standard deviation for LoG filter.
+        num_sigma : int, optional
+            Number of intermediate values for LoG filter.
+        overlap : float, optional
+            Minimum distance between blobs as fraction of radius.
+        radius_expansion : float, optional
+            Factor to expand blob radius for mask creation.
+        min_area : int, optional
+            Minimum object area for cleaning.
+        max_area : int, optional
+            Maximum object area for cleaning.
+        hole_fill_ratio : float, optional
+            Ratio for hole filling threshold.
+        contour_level : float, optional
+            Level for contour extraction.
+        clusters : int, optional
+            Number of clusters for grouping features.
+        pca_variance_ratio : float, optional
+            Proportion of variance to retain in PCA.
+        entropy_threshold : float, optional
+            Confidence threshold for pseudo-label selection.
+        max_train_samples : int, optional
+            Maximum number of training samples.
+        max_test_samples : int, optional
+            Maximum number of testing samples.
+        dataset_size_threshold : int, optional
+            Dataset size threshold for sampling strategy.
+        default_train_ratio : float, optional
+            Training ratio for train/test split.
+        smote_strategy : str, optional
+            SMOTE sampling strategy for class imbalance.
+        label_spreading_kernel : str, optional
+            Kernel type for label spreading algorithm.
+        plot_entropy_threshold : float, optional
+            Entropy threshold for plot visualization.
+        plot_dpi : int, optional
+            DPI resolution for saved plots.
+        random_state : int, optional
+            Random seed for reproducibility.
         """
-        # Update instance hyperparameters with any provided overrides
-        if clusters is not None:
-            self.clusters = clusters
-        if pca_variance_ratio is not None:
-            self.pca_variance_ratio = pca_variance_ratio
-        if entropy_threshold is not None:
-            self.entropy_threshold = entropy_threshold
-        if max_train_samples is not None:
-            self.max_train_samples = max_train_samples
-        if max_test_samples is not None:
-            self.max_test_samples = max_test_samples
-        if dataset_size_threshold is not None:
-            self.dataset_size_threshold = dataset_size_threshold
-        if default_train_ratio is not None:
-            self.default_train_ratio = default_train_ratio
-        if smote_strategy is not None:
-            self.smote_strategy = smote_strategy
-        if label_spreading_kernel is not None:
-            self.label_spreading_kernel = label_spreading_kernel
-        if plot_entropy_threshold is not None:
-            self.plot_entropy_threshold = plot_entropy_threshold
-        if plot_dpi is not None:
-            self.plot_dpi = plot_dpi
-        if random_state is not None:
-            self.random_state = random_state
-
-        seg = self.segment_images(threshold_rel)
+        # Get segmentation with optional parameters
+        seg = self.segment_images(
+            threshold_rel,
+            max_sigma=max_sigma,
+            num_sigma=num_sigma,
+            overlap=overlap,
+            radius_expansion=radius_expansion,
+            min_area=min_area,
+            max_area=max_area,
+            hole_fill_ratio=hole_fill_ratio,
+            contour_level=contour_level,
+        )
 
         # Create subset with feature extraction and clustering
-        subset_df = create_subset_df(
-            seg["rois"],
-            seg["layers"],
-            clusters=self.clusters,
-            pca_variance_ratio=self.pca_variance_ratio,
-            random_state=self.random_state,
-        )
+        subset_args = {
+            "rois": seg["rois"],
+            "layers": seg["layers"],
+        }
+        if clusters is not None:
+            subset_args["clusters"] = clusters
+        if pca_variance_ratio is not None:
+            subset_args["pca_variance_ratio"] = pca_variance_ratio
+        if random_state is not None:
+            subset_args["random_state"] = random_state
 
-        # Train classifier with current hyperparameters
-        model, metrics_combined = train_classifier(
-            subset_df,
-            seg["rois"],
-            seg["layers"],
-            samples,
-            model_type,
-            self.project_dir,
-            entropy_threshold=self.entropy_threshold,
-            max_train_samples=self.max_train_samples,
-            max_test_samples=self.max_test_samples,
-            dataset_size_threshold=self.dataset_size_threshold,
-            default_train_ratio=self.default_train_ratio,
-            smote_strategy=self.smote_strategy,
-            label_spreading_kernel=self.label_spreading_kernel,
-            plot_entropy_threshold=self.plot_entropy_threshold,
-            plot_dpi=self.plot_dpi,
-            random_state=self.random_state,
-        )
+        subset_df = create_subset_df(**subset_args)
+
+        # Train classifier with hyperparameters
+        train_args = {
+            "subset_df": subset_df,
+            "rois": seg["rois"],
+            "layers": seg["layers"],
+            "samples": samples,
+            "model_type": model_type,
+            "project_folder": self.project_dir,
+        }
+
+        # Add training parameters if provided
+        if entropy_threshold is not None:
+            train_args["entropy_threshold"] = entropy_threshold
+        if max_train_samples is not None:
+            train_args["max_train_samples"] = max_train_samples
+        if max_test_samples is not None:
+            train_args["max_test_samples"] = max_test_samples
+        if dataset_size_threshold is not None:
+            train_args["dataset_size_threshold"] = dataset_size_threshold
+        if default_train_ratio is not None:
+            train_args["default_train_ratio"] = default_train_ratio
+        if smote_strategy is not None:
+            train_args["smote_strategy"] = smote_strategy
+        if label_spreading_kernel is not None:
+            train_args["label_spreading_kernel"] = label_spreading_kernel
+        if plot_entropy_threshold is not None:
+            train_args["plot_entropy_threshold"] = plot_entropy_threshold
+        if plot_dpi is not None:
+            train_args["plot_dpi"] = plot_dpi
+        if random_state is not None:
+            train_args["random_state"] = random_state
+
+        model, metrics_combined = train_classifier(**train_args)
 
         self.model = model
         self.metrics = metrics_combined
         print("Model trained successfully.")
 
-    def get_hyperparameters(self) -> Dict:
+    def save_model(self, filename: str) -> Path:
         """
-        Get current hyperparameter values for training.
+        Save the trained model to disk.
+
+        Parameters
+        ----------
+        filename : str
+            Name for the saved model file (without .pkl extension).
 
         Returns
         -------
-        Dict
-            Dictionary containing all current hyperparameter values.
+        Path
+            Path to the saved model file.
         """
-        return {
-            # Feature extraction parameters
-            "clusters": self.clusters,
-            "pca_variance_ratio": self.pca_variance_ratio,
-            "random_state": self.random_state,
-            # Training parameters
-            "entropy_threshold": self.entropy_threshold,
-            "max_train_samples": self.max_train_samples,
-            "max_test_samples": self.max_test_samples,
-            "dataset_size_threshold": self.dataset_size_threshold,
-            "default_train_ratio": self.default_train_ratio,
-            # Semi-supervised learning parameters
-            "smote_strategy": self.smote_strategy,
-            "label_spreading_kernel": self.label_spreading_kernel,
-            # Visualization parameters
-            "plot_entropy_threshold": self.plot_entropy_threshold,
-            "plot_dpi": self.plot_dpi,
-        }
-
-    def save_model(self, filename: str):
-        """Save the trained model with a custom name."""
         if self.model is None:
-            raise ValueError("No trained model to save.")
-        if self.project_dir is None:
-            raise ValueError("Please, define project_dir before save_model.")
+            raise ValueError(
+                "No trained model to save. Train a model first using .train()."
+            )
 
-        with open(self.project_dir / f"{filename}.pkl", "wb") as file:
+        filepath = self.project_dir / f"{filename}.pkl"
+        with open(filepath, "wb") as file:
             pkl.dump(self.model, file)
-        print(f"Model saved as {filename}.pkl")
+        print(f"Model saved as {filepath}")
+        return filepath
 
-    def load_model(self, filename: str):
-        """Load a trained model from disk."""
-        if self.project_dir is None:
-            raise ValueError("Please, define project_dir before load_model.")
+    def load_model(self, filename: str) -> BaseEstimator:
+        """
+        Load a trained model from disk.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the model file to load (without .pkl extension).
+
+        Returns
+        -------
+        BaseEstimator
+            The loaded model.
+        """
         filepath = self.project_dir / f"{filename}.pkl"
         if not filepath.exists():
             raise FileNotFoundError(f"Model file {filepath} not found.")
 
         with open(filepath, "rb") as file:
             self.model = pkl.load(file)
-        print(f"Model {filename} loaded successfully. Use .model to access it.")
+        print(f"Model loaded successfully from {filepath}")
+        return self.model
 
-    def save_segmentation(self, filename: str):
-        """Save the segmented data with a custom name."""
+    def save_segmentation(self, filename: str) -> Path:
+        """
+        Save the segmented data to disk.
+
+        Parameters
+        ----------
+        filename : str
+            Name for the saved segmentation file (without .pkl extension).
+
+        Returns
+        -------
+        Path
+            Path to the saved segmentation file.
+        """
         if self.segmented_data is None:
-            raise ValueError("No segmented data to save.")
-        if self.project_dir is None:
-            raise ValueError("Please, define project_dir before save_segmentation.")
+            raise ValueError("No segmented data to save. Run segmentation first.")
 
-        with open(self.project_dir / f"{filename}.pkl", "wb") as file:
+        filepath = self.project_dir / f"{filename}.pkl"
+        with open(filepath, "wb") as file:
             pkl.dump(self.segmented_data, file)
-        print(f"Segmentation saved as {filename}.pkl")
+        print(f"Segmentation saved as {filepath}")
+        return filepath
 
-    def load_segmentation(self, filename: str):
-        """Load segmented data from disk."""
-        if self.project_dir is None:
-            raise ValueError("Please, define project_dir before load_segmentation.")
+    def load_segmentation(self, filename: str) -> dict:
+        """
+        Load segmented data from disk.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the segmentation file to load (without .pkl extension).
+
+        Returns
+        -------
+        dict
+            The loaded segmentation data.
+        """
         filepath = self.project_dir / f"{filename}.pkl"
         if not filepath.exists():
             raise FileNotFoundError(f"Segmentation file {filepath} not found.")
 
         with open(filepath, "rb") as file:
             self.segmented_data = pkl.load(file)
-        print(
-            f"Segmentation {filename} loaded successfully. Use .segmented_data to access it."
-        )
+        print(f"Segmentation loaded successfully from {filepath}")
+        return self.segmented_data
 
-    def analyze(self, threshold_rel: float = 0.5, cmap: str = "Reds"):
+    def analyze(
+        self,
+        threshold_rel: float = 0.5,
+        cmap: str = "Reds",
+        # Segmentation parameters (optional, for analysis-specific segmentation)
+        max_sigma: Optional[int] = None,
+        num_sigma: Optional[int] = None,
+        overlap: Optional[float] = None,
+        radius_expansion: Optional[float] = None,
+        min_area: Optional[int] = None,
+        max_area: Optional[int] = None,
+        hole_fill_ratio: Optional[float] = None,
+        contour_level: Optional[float] = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Apply the trained model to new images or a segmented object.
+        Apply the trained model to analyze images.
+
+        Parameters
+        ----------
+        threshold_rel : float, default=0.5
+            Threshold for segmentation.
+        cmap : str, default="Reds"
+            Colormap for visualization plots.
+        max_sigma : int, optional
+            Maximum standard deviation for LoG filter.
+        num_sigma : int, optional
+            Number of intermediate values for LoG filter.
+        overlap : float, optional
+            Minimum distance between blobs as fraction of radius.
+        radius_expansion : float, optional
+            Factor to expand blob radius for mask creation.
+        min_area : int, optional
+            Minimum object area for cleaning.
+        max_area : int, optional
+            Maximum object area for cleaning.
+        hole_fill_ratio : float, optional
+            Ratio for hole filling threshold.
+        contour_level : float, optional
+            Level for contour extraction.
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame]
+            Tuple containing (counts, features) DataFrames.
         """
         if self.model is None:
             raise ValueError(
-                """
-                No trained model available:
-                - Load a previously trained model using the load_model method.
-                - Train a new model using the train method.
-                """
+                "No trained model available. Either:\n"
+                "- Train a new model using the train() method, or\n"
+                "- Load a previously trained model using load_model()"
             )
 
-        if self.project_dir is None:
-            raise ValueError("Please, define project_dir before analyze.")
-
-        seg = self.segment_images(threshold_rel)
+        # Get segmentation with optional parameters
+        seg = self.segment_images(
+            threshold_rel,
+            max_sigma=max_sigma,
+            num_sigma=num_sigma,
+            overlap=overlap,
+            radius_expansion=radius_expansion,
+            min_area=min_area,
+            max_area=max_area,
+            hole_fill_ratio=hole_fill_ratio,
+            contour_level=contour_level,
+        )
         counts, features = iterate_predicting(
             seg["layers"], seg["rois"], cmap, self.model, self.project_dir
         )
         self.counts = counts
         self.features = features
 
-        # Save counts and features to CSV files
-        counts.to_csv(self.project_dir / "cell_counts.csv", index=False)
-        features.to_csv(self.project_dir / "cell_features.csv", index=False)
-        print("\nAnalysis complete. Results saved to project directory.")
+        # Save results to CSV files
+        counts_path = self.project_dir / "cell_counts.csv"
+        features_path = self.project_dir / "cell_features.csv"
+
+        counts.to_csv(counts_path, index=False)
+        features.to_csv(features_path, index=False)
+
+        print(f"\nAnalysis complete!")
+        print(f"- Cell counts saved to: {counts_path}")
+        print(f"- Cell features saved to: {features_path}")
+
+        return counts, features
+
+    def set_image_folder(self, image_folder: Path) -> None:
+        """
+        Set or change the image folder path.
+
+        Parameters
+        ----------
+        image_folder : Path
+            Path to folder containing TIFF images.
+        """
+        image_folder = Path(image_folder)
+        if not image_folder.exists():
+            raise FileNotFoundError(f"Image folder does not exist: {image_folder}")
+        self.image_folder = image_folder
+
+        # Clear segmented data since we're using a different image folder
+        self.segmented_data = None
+
+    def set_project_dir(self, project_dir: Path) -> None:
+        """
+        Set or change the project directory path.
+
+        Parameters
+        ----------
+        project_dir : Path
+            Directory to save models and results.
+        """
+        project_dir = Path(project_dir)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        self.project_dir = project_dir
+
+    def __repr__(self) -> str:
+        """
+        String representation of the CellRake object.
+
+        Returns
+        -------
+        str
+            String describing the current state of the CellRake object.
+        """
+        status_items = []
+
+        # Show most important status first
+        if self.model:
+            status_items.append("model=trained")
+
+        if self.segmented_data:
+            num_images = len(self.segmented_data.get("layers", {}))
+            status_items.append(f"segmented={num_images}")
+
+        if self.counts is not None:
+            status_items.append(f"analyzed={len(self.counts)}")
+
+        # Show paths with just the name, not full path
+        if self.image_folder:
+            folder_name = self.image_folder.name
+            status_items.append(f"images='{folder_name}'")
+
+        # project_dir is always available now
+        project_name = self.project_dir.name
+        status_items.append(f"project='{project_name}'")
+
+        status = ", ".join(status_items) if status_items else "empty"
+        return f"CellRake({status})"
