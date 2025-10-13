@@ -3,7 +3,7 @@
 import math
 import pickle as pkl
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,7 +15,7 @@ from cellrake.utils import crop
 
 
 def convert_to_roi(
-    polygons: Dict[int, List], layer: np.ndarray
+    polygons: Dict[int, np.ndarray], layer: np.ndarray
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """
     This function extracts the coordinates of the polygons and converts them into ROIs.
@@ -23,7 +23,7 @@ def convert_to_roi(
 
     Parameters:
     ----------
-    polygon : dict[int, np.ndarray]
+    polygons : dict[int, np.ndarray]
         A dictionary where each key is a label and each value is a single contour for that label.
 
     layer : numpy.ndarray
@@ -57,7 +57,7 @@ def convert_to_roi(
 
 def iterate_segmentation(
     image_folder: Path, threshold_rel: float
-) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
+) -> Tuple[Dict[str, Dict[str, Dict[str, np.ndarray]]], Dict[str, np.ndarray]]:
 
     rois = {}
     layers = {}
@@ -76,7 +76,9 @@ def iterate_segmentation(
     return rois, layers
 
 
-def export_rois(project_folder: Path, rois: Dict[str, Dict]) -> None:
+def export_rois(
+    project_folder: Path, rois: Dict[str, Dict[str, Dict[str, np.ndarray]]]
+) -> None:
     """
     This function saves the ROIs for each image into a separate `.pkl` file within the `rois_raw` directory
     inside the specified `project_folder`. Each file is named according to the image's tag (filename without extension).
@@ -99,7 +101,7 @@ def export_rois(project_folder: Path, rois: Dict[str, Dict]) -> None:
             pkl.dump(rois_dict, file)
 
 
-def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
+def process_blob(layer: np.ndarray, blob: np.ndarray) -> Optional[np.ndarray]:
     """
     This function processes a single blob to create a binary mask based on Otsu's thresholding.
 
@@ -113,8 +115,8 @@ def process_blob(layer: np.ndarray, blob: np.ndarray) -> np.ndarray:
 
     Returns:
     -------
-    list
-        A list of binary images corresponding to the processed blob.
+    Optional[np.ndarray]
+        A binary image corresponding to the processed blob, or None if processing fails.
     """
     # Extract the coordinates and radius from the blob
     y, x, r = blob
@@ -209,7 +211,7 @@ def create_combined_binary_image(layer: np.ndarray, threshold_rel: float) -> np.
     return combined_array
 
 
-def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
+def clean_binary_image(binary_image: np.ndarray, r: float) -> Optional[np.ndarray]:
 
     min_disk_area = 60
     max_disk_area = 2000
@@ -228,7 +230,7 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
     return cleaned
 
 
-def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
+def extract_polygons(labels: np.ndarray) -> Dict[int, np.ndarray]:
     """
     This function extracts polygons (contours) from the labeled image.
 
@@ -239,8 +241,8 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
 
     Returns:
     -------
-    Dict[int, List]
-        A dictionary where keys are labels and values are lists of polygon coordinates.
+    Dict[int, np.ndarray]
+        A dictionary where keys are labels and values are numpy arrays of polygon coordinates.
     """
     polygons = {}
     unique_labels = np.unique(labels)
@@ -263,7 +265,7 @@ def extract_polygons(labels: np.ndarray) -> Dict[int, List]:
 
 def segment_image(
     tif_path: Path, threshold_rel: float
-) -> Tuple[Dict[int, List], np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     This function segments an image to identify and extract ROI polygons.
 
@@ -277,9 +279,9 @@ def segment_image(
 
     Returns:
     -------
-    Tuple[Dict[int, List], np.ndarray]
+    Tuple[np.ndarray, np.ndarray]
         A tuple containing:
-        - A dictionary where keys are labels and values are lists of polygon coordinates.
+        - A binary array with the segmented cells.
         - The processed image layer as a NumPy array.
     """
     # Read the image in its original form (unchanged)
