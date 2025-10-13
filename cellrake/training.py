@@ -23,32 +23,30 @@ from cellrake.utils import (
     train_model,
 )
 
+# ================================================================================
+# USER INTERACTION UTILITIES
+# ================================================================================
 
-def user_input(roi_values: Dict[str, np.ndarray], layer: np.ndarray) -> str:
+
+def user_input(
+    roi_values: Dict[str, np.ndarray], layer: np.ndarray, padding: int = 120
+) -> str:
     """
-    This function visually displays each ROI overlaid on the image layer and
-    prompts the user to classify the ROI as either a cell (1) or non-cell (0).
-    The results are stored in a dictionary with the ROI names as keys and the
-    labels as values.
+    Display ROI overlaid on image and prompt user for cell/non-cell classification.
 
-    Parameters:
+    Parameters
     ----------
-    roi_dict : dict
-        A dictionary containing the coordinates of the ROIs. Each entry should
-        have at least the following keys:
-        - "x": A list or array of x-coordinates of the ROI vertices.
-        - "y": A list or array of y-coordinates of the ROI vertices.
+    roi_values : Dict[str, np.ndarray]
+        Dictionary with 'x' and 'y' keys containing ROI coordinates.
+    layer : np.ndarray
+        2D image array for ROI visualization.
+    padding : int, default=120
+        Padding pixels for cropped ROI visualization.
 
-    layer : numpy.ndarray
-        A 2D NumPy array representing the image layer on which the ROIs are overlaid.
-        The shape of the array should be (height, width).
-
-    Returns:
+    Returns
     -------
-    dict
-        A dictionary where keys are the ROI names and values are dictionaries with
-        a key "label" and an integer value representing the user's classification:
-        1 for cell, 0 for non-cell.
+    str
+        User classification: '1' for cell, '0' for non-cell.
     """
     x_coords, y_coords = roi_values["x"], roi_values["y"]
 
@@ -66,7 +64,7 @@ def user_input(roi_values: Dict[str, np.ndarray], layer: np.ndarray) -> str:
 
     # Cropped image with padding, ROI highlighted
     layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
-        layer, x_coords, y_coords, padding=120
+        layer, x_coords, y_coords, padding=padding
     )
     axes[2].imshow(layer_cropped_small, cmap="viridis")
     axes[2].plot(x_coords_cropped, y_coords_cropped, "m-", linewidth=1)
@@ -90,97 +88,25 @@ def user_input(roi_values: Dict[str, np.ndarray], layer: np.ndarray) -> str:
     return user_input_value
 
 
-def create_subset_df(
-    rois: Dict[str, dict], layers: Dict[str, np.ndarray], clusters: int
-) -> pd.DataFrame:
-    """
-    This function processes the provided ROIs by calculating various statistical and texture features
-    for each ROI in each image layer. It clusters the features into two groups (approx. positive and
-    negative ROIs) and returns a sample dataframe of features with a balanced number of both clusters.
-
-    Parameters:
-    ----------
-    rois : dict
-        A dictionary where keys are image tags and values are dictionaries of ROIs.
-        Each ROI dictionary contains the coordinates of the ROI.
-
-    layers : dict
-        A dictionary where keys are image tags and values are 2D NumPy arrays representing
-        the image layers from which the ROIs were extracted.
-
-    Returns:
-    -------
-    pd.DataFrame
-        A DataFrame where each row corresponds to an ROI and each column contains its features.
-    """
-
-    # Extract statistical features from each ROI
-    roi_props_dict = {}
-    for tag in tqdm(rois.keys(), desc="Extracting input features", unit="image"):
-        roi_dict = rois[tag]
-        layer = layers[tag]
-
-        # Check if roi_dict is empty
-        if not roi_dict:
-            continue
-
-        roi_props_dict[tag] = create_stats_dict(roi_dict, layer)
-
-    # Flatten the dictionary structure for input features
-    input_features = {}
-    for tag, all_rois in roi_props_dict.items():
-        for roi_num, stats in all_rois.items():
-            input_features[f"{tag}_{roi_num}"] = stats
-    features_df = pd.DataFrame.from_dict(input_features, orient="index")
-
-    if features_df.empty:
-        raise ValueError("The features DataFrame is empty. Please provide a valid one.")
-
-    # Cluster the features to aproximate the positive/negative classes
-    kmeans_pipeline = Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            ("pca", PCA(n_components=0.95, random_state=42)),
-            ("kmeans", KMeans(n_clusters=clusters, random_state=42)),
-        ]
-    )
-    best_clusters = kmeans_pipeline.fit_predict(features_df)
-    features_df["cluster"] = best_clusters
-
-    subset_df = features_df.copy()
-
-    # Ensure specific columns have the correct data types
-    subset_df["min_intensity"] = subset_df["min_intensity"].astype(int)
-    subset_df["max_intensity"] = subset_df["max_intensity"].astype(int)
-    subset_df["hog_mean"] = subset_df["hog_mean"].astype(float)
-    subset_df["hog_std"] = subset_df["hog_std"].astype(float)
-
-    return subset_df
-
-
 def manual_labeling(
     features_df: pd.DataFrame, rois: Dict[str, dict], layers: Dict[str, np.ndarray]
 ) -> pd.DataFrame:
     """
-    This function asks the user to label the images corresponding to the features_df.
+    Prompt user to manually label ROIs for training data.
 
-    Parameters:
+    Parameters
     ----------
-    features_df: pd.DataFrame
-        The training features where each row is a sample and each column is a feature.
+    features_df : pd.DataFrame
+        DataFrame with features where each row is a sample.
+    rois : Dict[str, dict]
+        Dictionary mapping image tags to ROI dictionaries with coordinates.
+    layers : Dict[str, np.ndarray]
+        Dictionary mapping image tags to 2D image arrays.
 
-    rois : dict
-        A dictionary where keys are image tags and values are dictionaries of ROIs.
-        Each ROI dictionary contains the coordinates of the ROI.
-
-    layers : dict
-        A dictionary where keys are image tags and values are 2D NumPy arrays representing
-        the image layers from which the ROIs were extracted.
-
-    Returns:
+    Returns
     -------
     pd.DataFrame
-        A dataframe with the manual labels under the column "label_column"
+        DataFrame with manual labels in "label_column".
     """
     if features_df.empty:
         raise ValueError("The features DataFrame is empty. Please provide a valid one.")
@@ -205,13 +131,45 @@ def manual_labeling(
     return labels_df
 
 
+# ================================================================================
+# SEMI-SUPERVISED LEARNING ALGORITHMS
+# ================================================================================
+
+
 def label_speading(
     subset_df: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
+    smote_strategy: str,
+    label_spreading_kernel: str,
+    random_state: int,
 ) -> pd.DataFrame:
+    """
+    Apply semi-supervised learning using label spreading for pseudo-labeling.
 
+    Parameters
+    ----------
+    subset_df : pd.DataFrame
+        DataFrame with features and cluster assignments.
+    rois : Dict[str, dict]
+        Dictionary mapping image tags to ROI dictionaries with coordinates.
+    layers : Dict[str, np.ndarray]
+        Dictionary mapping image tags to 2D image arrays.
+    samples : int
+        Number of samples to manually label from each cluster.
+    smote_strategy : str
+        SMOTE sampling strategy for handling class imbalance.
+    label_spreading_kernel : str
+        Kernel type for label spreading algorithm.
+    random_state : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with pseudo-labels and confidence metrics.
+    """
     # Identify the nature of the clusters
     pool_X = subset_df.copy()
 
@@ -220,7 +178,7 @@ def label_speading(
     for cluster in pool_X["cluster"].unique():
         cluster_df = pool_X[pool_X["cluster"] == cluster]
         if len(cluster_df) >= samples:
-            sampled_df = cluster_df.sample(n=samples, random_state=42)
+            sampled_df = cluster_df.sample(n=samples, random_state=random_state)
         else:
             sampled_df = cluster_df
         exploratory_dfs.append(sampled_df)
@@ -237,7 +195,7 @@ def label_speading(
     X_labeled_standardized = scaler.fit_transform(X_labeled)
 
     # Oversample the minority class
-    smote = SMOTE(sampling_strategy="minority")
+    smote = SMOTE(sampling_strategy=smote_strategy, random_state=random_state)
     X_resampled, y_resampled = smote.fit_resample(X_labeled_standardized, y_labeled)
 
     # Standardize the pool_X data
@@ -249,7 +207,7 @@ def label_speading(
     y_combined = np.concatenate([y_resampled, [-1] * len(X_pool)])
 
     # Initialize and fit the LabelSpreading model
-    ls = LabelSpreading(kernel="knn")
+    ls = LabelSpreading(kernel=label_spreading_kernel)
     ls.fit(X_combined, y_combined)
 
     # Separate back into labeled and pool data
@@ -282,8 +240,38 @@ def label_speading(
     return total_df
 
 
-def plot_pca(total_df: pd.DataFrame, project_folder: Union[str, Path]) -> None:
+# ================================================================================
+# VISUALIZATION UTILITIES
+# ================================================================================
 
+
+def plot_pca(
+    total_df: pd.DataFrame,
+    project_folder: Union[str, Path],
+    entropy_threshold: float,
+    plot_dpi: int,
+    random_state: int,
+) -> None:
+    """
+    Create 2D PCA visualization of labeled and pseudo-labeled data.
+
+    Parameters
+    ----------
+    total_df : pd.DataFrame
+        DataFrame with features, labels, and confidence metrics.
+    project_folder : Union[str, Path]
+        Path to project folder for saving the plot.
+    entropy_threshold : float
+        Entropy threshold for determining confidence in pseudo-labels.
+    plot_dpi : int
+        DPI resolution for saved plot.
+    random_state : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    None
+    """
     # Create colormaps
     pastel1_colors = ["#fbb4ae", "#b3cde3"]  # First two colors of Pastel1
     set1_colors = ["#e41a1c", "#377eb8"]  # First two colors of Set1
@@ -292,7 +280,7 @@ def plot_pca(total_df: pd.DataFrame, project_folder: Union[str, Path]) -> None:
     pipeline = Pipeline(
         [
             ("scaler", StandardScaler()),
-            ("pca", PCA(n_components=2, random_state=42)),
+            ("pca", PCA(n_components=2, random_state=random_state)),
         ]
     )
     X = total_df.drop(
@@ -312,7 +300,7 @@ def plot_pca(total_df: pd.DataFrame, project_folder: Union[str, Path]) -> None:
     label_0 = total_df.labels == 0
     label_1 = total_df.labels == 1
     correct_prob = total_df.is_zero_prob == False
-    confident = total_df.myentropy < 0.2
+    confident = total_df.myentropy < entropy_threshold
     manual = total_df.manual == True
 
     # Plot the data points
@@ -372,7 +360,7 @@ def plot_pca(total_df: pd.DataFrame, project_folder: Union[str, Path]) -> None:
 
     # Save the plot as a PNG file
     output_path = f"{project_folder}/pca_label_spreading.png"
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=plot_dpi, bbox_inches="tight")
     plt.close()
 
 
@@ -384,13 +372,42 @@ def plot_pca_train_test(
     y_train: np.ndarray,
     y_test: np.ndarray,
     project_folder: Union[str, Path],
+    plot_dpi: int,
+    random_state: int,
 ) -> None:
+    """
+    Create 2D PCA visualization of training and testing data splits.
 
+    Parameters
+    ----------
+    total_df : pd.DataFrame
+        DataFrame with features for determining feature names.
+    X : np.ndarray
+        Complete feature array for fitting PCA.
+    X_train : np.ndarray
+        Training feature array.
+    X_test : np.ndarray
+        Testing feature array.
+    y_train : np.ndarray
+        Training labels.
+    y_test : np.ndarray
+        Testing labels.
+    project_folder : Union[str, Path]
+        Path to project folder for saving the plot.
+    plot_dpi : int
+        DPI resolution for saved plot.
+    random_state : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    None
+    """
     # Reduce to 2D using PCA
     pipeline = Pipeline(
         [
             ("scaler", StandardScaler()),
-            ("pca", PCA(n_components=2, random_state=42)),
+            ("pca", PCA(n_components=2, random_state=random_state)),
         ]
     )
     pipeline.fit(X)
@@ -464,8 +481,13 @@ def plot_pca_train_test(
 
     # Save the plot as a PNG file
     output_path = f"{project_folder}/pca_train_test.png"
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=plot_dpi, bbox_inches="tight")
     plt.close()
+
+
+# ================================================================================
+# WORKFLOW ORCHESTRATION
+# ================================================================================
 
 
 def handle_pseudo_labels(
@@ -474,12 +496,133 @@ def handle_pseudo_labels(
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
+    smote_strategy: str,
+    label_spreading_kernel: str,
+    plot_entropy_threshold: float,
+    plot_dpi: int,
+    random_state: int,
 ) -> pd.DataFrame:
+    """
+    Generate pseudo-labels using label spreading and create visualization.
 
-    total_df = label_speading(subset_df, rois, layers, samples)
-    plot_pca(total_df, project_folder)
+    Parameters
+    ----------
+    project_folder : Union[str, Path]
+        Path to project folder for saving plots.
+    subset_df : pd.DataFrame
+        DataFrame with features and cluster assignments.
+    rois : Dict[str, dict]
+        Dictionary mapping image tags to ROI dictionaries with coordinates.
+    layers : Dict[str, np.ndarray]
+        Dictionary mapping image tags to 2D image arrays.
+    samples : int
+        Number of samples to manually label from each cluster.
+    smote_strategy : str
+        SMOTE sampling strategy for handling class imbalance.
+    label_spreading_kernel : str
+        Kernel type for label spreading algorithm.
+    plot_entropy_threshold : float
+        Entropy threshold for plot visualization confidence.
+    plot_dpi : int
+        DPI resolution for saved plots.
+    random_state : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with pseudo-labels and confidence metrics.
+    """
+    total_df = label_speading(
+        subset_df,
+        rois,
+        layers,
+        samples,
+        smote_strategy,
+        label_spreading_kernel,
+        random_state,
+    )
+    plot_pca(total_df, project_folder, plot_entropy_threshold, plot_dpi, random_state)
     print("Pseudo-labeled dataset generated.")
     return total_df
+
+
+# ================================================================================
+# MAIN EXPORTED FUNCTIONS
+# ================================================================================
+
+
+def create_subset_df(
+    rois: Dict[str, dict],
+    layers: Dict[str, np.ndarray],
+    clusters: int = 2,
+    pca_variance_ratio: float = 0.95,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """
+    Extract features from ROIs and cluster them into groups for training.
+
+    Parameters
+    ----------
+    rois : Dict[str, dict]
+        Dictionary mapping image tags to ROI dictionaries with coordinates.
+    layers : Dict[str, np.ndarray]
+        Dictionary mapping image tags to 2D image arrays.
+    clusters : int, default=2
+        Number of clusters for grouping features.
+    pca_variance_ratio : float, default=0.95
+        Proportion of variance to retain in PCA dimensionality reduction.
+    random_state : int, default=42
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with ROI features and cluster assignments.
+    """
+
+    # Extract statistical features from each ROI
+    roi_props_dict = {}
+    for tag in tqdm(rois.keys(), desc="Extracting input features", unit="image"):
+        roi_dict = rois[tag]
+        layer = layers[tag]
+
+        # Check if roi_dict is empty
+        if not roi_dict:
+            continue
+
+        roi_props_dict[tag] = create_stats_dict(roi_dict, layer)
+
+    # Flatten the dictionary structure for input features
+    input_features = {}
+    for tag, all_rois in roi_props_dict.items():
+        for roi_num, stats in all_rois.items():
+            input_features[f"{tag}_{roi_num}"] = stats
+    features_df = pd.DataFrame.from_dict(input_features, orient="index")
+
+    if features_df.empty:
+        raise ValueError("The features DataFrame is empty. Please provide a valid one.")
+
+    # Cluster the features to aproximate the positive/negative classes
+    kmeans_pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("pca", PCA(n_components=pca_variance_ratio, random_state=random_state)),
+            ("kmeans", KMeans(n_clusters=clusters, random_state=random_state)),
+        ]
+    )
+    best_clusters = kmeans_pipeline.fit_predict(features_df)
+    features_df["cluster"] = best_clusters
+
+    subset_df = features_df.copy()
+
+    # Ensure specific columns have the correct data types
+    subset_df["min_intensity"] = subset_df["min_intensity"].astype(int)
+    subset_df["max_intensity"] = subset_df["max_intensity"].astype(int)
+    subset_df["hog_mean"] = subset_df["hog_mean"].astype(float)
+    subset_df["hog_std"] = subset_df["hog_std"].astype(float)
+
+    return subset_df
 
 
 def train_classifier(
@@ -489,48 +632,78 @@ def train_classifier(
     samples: int,
     model_type: str,
     project_folder: Union[str, Path],
+    entropy_threshold: float = 0.025,
+    max_train_samples: int = 1000,
+    max_test_samples: int = 1000,
+    dataset_size_threshold: int = 2000,
+    default_train_ratio: float = 0.8,
+    smote_strategy: str = "minority",
+    label_spreading_kernel: str = "knn",
+    plot_entropy_threshold: float = 0.2,
+    plot_dpi: int = 300,
+    random_state: int = 42,
 ) -> Tuple[Pipeline, pd.DataFrame]:
     """
-    The function begins by splitting the dataset into training and testing sets, with a small
-    portion of the training set manually labeled. It then enters a loop where the model is trained,
-    evaluated, and used to predict the uncertainty of the unlabeled instances. The most uncertain
-    instances are selected for manual labeling, added to the labeled dataset, and the process repeats
-    until the improvement in model performance becomes negligible.
+    Train a classifier using semi-supervised learning with label spreading.
 
-    Parameters:
+    Parameters
     ----------
     subset_df : pd.DataFrame
-        A DataFrame where each row corresponds to an ROI and each column contains its features.
-
-    rois : dict
-        A dictionary where keys are image tags and values are dictionaries of ROIs.
-        Each ROI dictionary contains the coordinates of the ROI.
-
-    layers : dict
-        A dictionary where keys are image tags and values are 2D NumPy arrays representing
-        the image layers from which the ROIs were extracted.
-
+        DataFrame with ROI features and cluster assignments.
+    rois : Dict[str, dict]
+        Dictionary mapping image tags to ROI dictionaries with coordinates.
+    layers : Dict[str, np.ndarray]
+        Dictionary mapping image tags to 2D image arrays.
     samples : int
-        The number of samples to draw from each cluster for initial labeling.
+        Number of samples to draw from each cluster for initial labeling.
+    model_type : str
+        Type of model to train ('svm', 'rf', 'et', or 'logreg').
+    project_folder : Union[str, Path]
+        Path to project folder for saving results and models.
+    entropy_threshold : float, default=0.025
+        Confidence threshold for pseudo-label selection based on entropy.
+    max_train_samples : int, default=1000
+        Maximum number of training samples when dataset is large.
+    max_test_samples : int, default=1000
+        Maximum number of testing samples when dataset is large.
+    dataset_size_threshold : int, default=2000
+        Dataset size above which to use fixed sample limits.
+    default_train_ratio : float, default=0.8
+        Training ratio for standard train/test split on smaller datasets.
+    smote_strategy : str, default="minority"
+        SMOTE sampling strategy for handling class imbalance.
+    label_spreading_kernel : str, default="knn"
+        Kernel type for label spreading algorithm.
+    plot_entropy_threshold : float, default=0.2
+        Entropy threshold for plot visualization confidence.
+    plot_dpi : int, default=300
+        DPI resolution for saved plots.
+    random_state : int, default=42
+        Random seed for reproducibility.
 
-    model_type : str, optional
-        The type of model to train. Options are 'svm', 'rf', 'et', or 'logreg'. Default is 'svm'.
-
-    project_folder : Path
-        The path to the project folder where results and models will be saved.
-
-    Returns:
+    Returns
     -------
     Tuple[Pipeline, pd.DataFrame]
-        The best estimator found by active learning and a DataFrame with performance metrics.
+        Trained classifier pipeline and performance metrics DataFrame.
     """
     # Label spreading
-    total_df = handle_pseudo_labels(project_folder, subset_df, rois, layers, samples)
+    total_df = handle_pseudo_labels(
+        project_folder,
+        subset_df,
+        rois,
+        layers,
+        samples,
+        smote_strategy,
+        label_spreading_kernel,
+        plot_entropy_threshold,
+        plot_dpi,
+        random_state,
+    )
 
     # Prepare features and labels
     print("Proceeding with the preliminar model...")
     correct_prob = total_df.is_zero_prob == False
-    confident = total_df.myentropy < 0.025
+    confident = total_df.myentropy < entropy_threshold
     mask = correct_prob & confident
 
     raw_features = total_df.drop(
@@ -546,32 +719,51 @@ def train_classifier(
     # Split into train/test
     length = len(X)
 
-    if length > 2000:
-        train_size = 1000 / length
+    if length > dataset_size_threshold:
+        train_size = max_train_samples / length
 
         # Initial split with proportional stratification
         X_train, X_temp, y_train, y_temp, _, clusters_temp = train_test_split(
-            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
+            X,
+            y,
+            clusters,
+            train_size=train_size,
+            random_state=random_state,
+            stratify=clusters,
         )
 
-        # Adjust the remaining temp data to ensure exactly 1000 samples for testing
-        test_size_adjusted = 1000 / len(X_temp)
+        # Adjust the remaining temp data to ensure exactly max_test_samples samples for testing
+        test_size_adjusted = max_test_samples / len(X_temp)
         X_test, _, y_test, _, _, _ = train_test_split(
             X_temp,
             y_temp,
             clusters_temp,
             train_size=test_size_adjusted,
-            random_state=42,
+            random_state=random_state,
             stratify=clusters_temp,
         )
     else:
-        # Standard 80-20 split
-        train_size = 0.8
+        # Standard train/test split
         X_train, X_test, y_train, y_test, _, _ = train_test_split(
-            X, y, clusters, train_size=train_size, random_state=42, stratify=clusters
+            X,
+            y,
+            clusters,
+            train_size=default_train_ratio,
+            random_state=random_state,
+            stratify=clusters,
         )
 
-    plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder)
+    plot_pca_train_test(
+        total_df,
+        X,
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        project_folder,
+        plot_dpi,
+        random_state,
+    )
 
     # Train classifier
     best_model = train_model(X_train, y_train, model_type)
