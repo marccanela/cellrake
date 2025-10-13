@@ -419,31 +419,3 @@ def iterate_segmentation(
         layers[tag] = layer
 
     return rois, layers
-
-
-# ================================================================================
-# COMPLEMENTARY FUNCTION TO EXPORT ROIS
-# ================================================================================
-
-
-def export_rois(
-    project_folder: Path, rois: Dict[str, Dict[str, Dict[str, np.ndarray]]]
-) -> None:
-    """
-    Export ROI data to pickle files.
-
-    Parameters
-    ----------
-    project_folder : Path
-        Path to the project directory.
-    rois : Dict[str, Dict[str, Dict[str, np.ndarray]]]
-        ROI data to export.
-
-    Returns
-    -------
-    None
-    """
-    # Export each ROI dictionary to a .pkl file
-    for tag, rois_dict in rois.items():
-        with open(str((project_folder / "rois_raw") / f"{tag}.pkl"), "wb") as file:
-            pkl.dump(rois_dict, file)

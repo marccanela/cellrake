@@ -2,7 +2,7 @@
 
 import pickle as pkl
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -19,11 +19,11 @@ from cellrake.utils import create_stats_dict, crop, export_data, fix_polygon
 def analyze_image(
     tag: str,
     layers: Dict[str, np.ndarray],
-    rois: Dict[str, Dict[str, np.ndarray]],
+    rois: Dict[str, Dict[str, Dict[str, np.ndarray]]],
     cmap: mcolors.Colormap,
     project_folder: Path,
     best_model: BaseEstimator,
-) -> Dict[str, Dict[str, np.ndarray]]:
+) -> Tuple[Dict[str, Dict[str, np.ndarray]], pd.DataFrame]:
     """
     This function analyzes an image by processing ROIs, classifying them using a model,
     and visualizing the results.
@@ -33,11 +33,11 @@ def analyze_image(
     tag : str
         Unique identifier for the image to be analyzed.
 
-    layers : dict
+    layers : Dict[str, np.ndarray]
         A dictionary where keys are image tags and values are 2D numpy arrays
         representing the image layers.
 
-    rois : dict
+    rois : Dict[str, Dict[str, Dict[str, np.ndarray]]]
         A dictionary where keys are image tags and values are dictionaries of ROIs.
         Each ROI is represented by its coordinates in the dictionary.
 
@@ -52,9 +52,11 @@ def analyze_image(
 
     Returns:
     -------
-    dict
-        A dictionary of ROIs considered positive by the model or filtering criteria.
-        The keys are ROI names and the values are dictionaries containing the ROI information.
+    Tuple[Dict[str, Dict[str, np.ndarray]], pd.DataFrame]
+        A tuple containing:
+        - A dictionary of ROIs considered positive by the model or filtering criteria.
+          The keys are ROI names and the values are dictionaries containing the ROI information.
+        - A DataFrame containing the feature data for the positive ROIs.
     """
     # Load the ROI information and image layer
     roi_dict = rois[tag]
@@ -116,11 +118,11 @@ def analyze_image(
 
 def iterate_predicting(
     layers: Dict[str, np.ndarray],
-    rois: Dict[str, Dict[str, np.ndarray]],
+    rois: Dict[str, Dict[str, Dict[str, np.ndarray]]],
     cmap: mcolors.Colormap,
     best_model: BaseEstimator,
     project_folder: Path,
-) -> None:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     This function processes each image by identifying positive ROIs using
     the provided model. Calculates and saves statistics on the number of ROIs (cells) per image.
@@ -131,7 +133,7 @@ def iterate_predicting(
         A dictionary where keys are image tags and values are 2D numpy arrays
         representing the image layers.
 
-    rois : Dict[str, Dict[str, np.ndarray]]
+    rois : Dict[str, Dict[str, Dict[str, np.ndarray]]]
         A dictionary where keys are image tags and values are dictionaries of ROIs.
         Each ROI is represented by its coordinates in the dictionary.
 
@@ -146,8 +148,10 @@ def iterate_predicting(
 
     Returns:
     -------
-    None
-        This function does not return a value but saves the results to CSV and Excel files.
+    Tuple[pd.DataFrame, pd.DataFrame]
+        A tuple containing:
+        - A DataFrame with file names and cell counts for each image.
+        - A DataFrame with concatenated feature data for all positive ROIs.
 
     Notes:
     -----
