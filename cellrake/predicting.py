@@ -25,38 +25,27 @@ def analyze_image(
     best_model: BaseEstimator,
 ) -> Tuple[Dict[str, Dict[str, np.ndarray]], pd.DataFrame]:
     """
-    This function analyzes an image by processing ROIs, classifying them using a model,
-    and visualizing the results.
+    Analyze an image by processing ROIs, classifying them using a model, and visualizing results.
 
-    Parameters:
+    Parameters
     ----------
     tag : str
         Unique identifier for the image to be analyzed.
-
     layers : Dict[str, np.ndarray]
-        A dictionary where keys are image tags and values are 2D numpy arrays
-        representing the image layers.
-
+        Dictionary where keys are image tags and values are 2D numpy arrays representing image layers.
     rois : Dict[str, Dict[str, Dict[str, np.ndarray]]]
-        A dictionary where keys are image tags and values are dictionaries of ROIs.
-        Each ROI is represented by its coordinates in the dictionary.
-
-    cmap : matplotlib.colors.Colormap
-        The colormap to be used for visualization.
-
+        Dictionary where keys are image tags and values are dictionaries of ROIs with coordinates.
+    cmap : mcolors.Colormap
+        Colormap to be used for visualization.
     project_folder : Path
-        The directory where the processed ROIs and visualizations will be saved.
-
+        Directory where processed ROIs and visualizations will be saved.
     best_model : BaseEstimator
-        A trained model with a `predict` method for classifying ROIs.
+        Trained model with predict method for classifying ROIs.
 
-    Returns:
+    Returns
     -------
     Tuple[Dict[str, Dict[str, np.ndarray]], pd.DataFrame]
-        A tuple containing:
-        - A dictionary of ROIs considered positive by the model or filtering criteria.
-          The keys are ROI names and the values are dictionaries containing the ROI information.
-        - A DataFrame containing the feature data for the positive ROIs.
+        Tuple containing positive ROIs dictionary and feature DataFrame.
     """
     # Load the ROI information and image layer
     roi_dict = rois[tag]
@@ -124,38 +113,25 @@ def iterate_predicting(
     project_folder: Path,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    This function processes each image by identifying positive ROIs using
-    the provided model. Calculates and saves statistics on the number of ROIs (cells) per image.
+    Process each image by identifying positive ROIs and calculating cell counts.
 
-    Parameters:
+    Parameters
     ----------
     layers : Dict[str, np.ndarray]
-        A dictionary where keys are image tags and values are 2D numpy arrays
-        representing the image layers.
-
+        Dictionary where keys are image tags and values are 2D numpy arrays representing image layers.
     rois : Dict[str, Dict[str, Dict[str, np.ndarray]]]
-        A dictionary where keys are image tags and values are dictionaries of ROIs.
-        Each ROI is represented by its coordinates in the dictionary.
-
+        Dictionary where keys are image tags and values are dictionaries of ROIs with coordinates.
     cmap : mcolors.Colormap
-        The colormap to be used for visualization.
-
+        Colormap to be used for visualization.
     best_model : BaseEstimator
-        A trained model with a `predict` method for classifying ROIs.
-
+        Trained model with predict method for classifying ROIs.
     project_folder : Path
-        The directory where the processed ROIs and visualizations will be saved.
+        Directory where processed ROIs and visualizations will be saved.
 
-    Returns:
+    Returns
     -------
     Tuple[pd.DataFrame, pd.DataFrame]
-        A tuple containing:
-        - A DataFrame with file names and cell counts for each image.
-        - A DataFrame with concatenated feature data for all positive ROIs.
-
-    Notes:
-    -----
-    - The function assumes that each image tag in `rois` has a corresponding image layer in `layers`.
+        Tuple containing cell counts DataFrame and concatenated features DataFrame.
     """
     results = []
     concatenated_df = pd.DataFrame()
@@ -203,36 +179,23 @@ def colocalize(
     images_path_2: Path,
 ) -> None:
     """
-    This function processes TIFF images from two sets of identified ROIs, compares them to find
-    overlaps based on an 80% area overlap criterion, and exports the results as images
-    and CSV files.
+    Compare two sets of ROIs to find overlapping cells based on 80% area overlap criterion.
 
-    Parameters:
+    Parameters
     ----------
     processed_rois_path_1 : Path
-        Path to the PKL processed ROIs from the first set of images.
-
+        Path to PKL file with processed ROIs from the first image set.
     images_path_1 : Path
-        Path to the folder containing TIFF images corresponding to the first set of ROIs.
-
+        Path to folder containing TIFF images corresponding to first ROI set.
     processed_rois_path_2 : Path
-        Path to the PKL processed ROIs from the second set of images.
-
+        Path to PKL file with processed ROIs from the second image set.
     images_path_2 : Path
-        Path to the folder containing TIFF images corresponding to the second set of ROIs.
+        Path to folder containing TIFF images corresponding to second ROI set.
 
-    Returns:
+    Returns
     -------
     None
-        This function does not return a value but saves overlapping ROI results as images
-        and data files.
-
-    Notes:
-    -----
-    - The function assumes that each TIFF image file in `images_path_1` and `images_path_2`
-      has a corresponding ROI file in `processed_rois_path_1` and `processed_rois_path_2`.
-    - The overlap images and results are saved in the "colocalization" subfolder within
-      `processed_rois_path_1`.
+        Saves overlapping ROI results as images and CSV files.
     """
     file_names = []
     num_cells = []
