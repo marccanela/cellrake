@@ -22,7 +22,6 @@ class CellRake:
         self,
         project_dir: Path,
         image_folder: Optional[Path] = None,
-        segmented_data: Optional[dict] = None,
     ):
         """
         Initialize a CellRake object.
@@ -33,8 +32,6 @@ class CellRake:
             Directory to save models and results.
         image_folder : Path, optional
             Folder containing TIFF images.
-        segmented_data : dict, optional
-            Pre-segmented ROIs and layers data.
         """
         # Validate and setup directories
         project_dir = Path(project_dir)
@@ -47,7 +44,6 @@ class CellRake:
 
         # Core instance variables
         self.image_folder: Optional[Path] = image_folder
-        self.segmented_data: Optional[Dict] = segmented_data
         self.project_dir: Path = project_dir
         self.model: Optional[BaseEstimator] = None
         self.metrics: Optional[Dict] = None
@@ -146,14 +142,12 @@ class CellRake:
         hole_fill_ratio: Optional[float] = None,
         contour_level: Optional[float] = None,
         # Training parameters
-        clusters: Optional[int] = None,
         pca_variance_ratio: Optional[float] = None,
         entropy_threshold: Optional[float] = None,
         max_train_samples: Optional[int] = None,
         max_test_samples: Optional[int] = None,
         dataset_size_threshold: Optional[int] = None,
         default_train_ratio: Optional[float] = None,
-        smote_strategy: Optional[str] = None,
         label_spreading_kernel: Optional[str] = None,
         plot_entropy_threshold: Optional[float] = None,
         plot_dpi: Optional[int] = None,
@@ -186,8 +180,6 @@ class CellRake:
             Ratio for hole filling threshold.
         contour_level : float, optional
             Level for contour extraction.
-        clusters : int, optional
-            Number of clusters for grouping features.
         pca_variance_ratio : float, optional
             Proportion of variance to retain in PCA.
         entropy_threshold : float, optional
@@ -200,8 +192,6 @@ class CellRake:
             Dataset size threshold for sampling strategy.
         default_train_ratio : float, optional
             Training ratio for train/test split.
-        smote_strategy : str, optional
-            SMOTE sampling strategy for class imbalance.
         label_spreading_kernel : str, optional
             Kernel type for label spreading algorithm.
         plot_entropy_threshold : float, optional
@@ -229,8 +219,6 @@ class CellRake:
             "rois": seg["rois"],
             "layers": seg["layers"],
         }
-        if clusters is not None:
-            subset_args["clusters"] = clusters
         if pca_variance_ratio is not None:
             subset_args["pca_variance_ratio"] = pca_variance_ratio
         if random_state is not None:
@@ -259,8 +247,6 @@ class CellRake:
             train_args["dataset_size_threshold"] = dataset_size_threshold
         if default_train_ratio is not None:
             train_args["default_train_ratio"] = default_train_ratio
-        if smote_strategy is not None:
-            train_args["smote_strategy"] = smote_strategy
         if label_spreading_kernel is not None:
             train_args["label_spreading_kernel"] = label_spreading_kernel
         if plot_entropy_threshold is not None:
@@ -372,7 +358,7 @@ class CellRake:
 
     def analyze(
         self,
-        threshold_rel: float = 0.5,
+        threshold_rel: float = 0.1,
         cmap: str = "Reds",
         # Segmentation parameters (optional, for analysis-specific segmentation)
         max_sigma: Optional[int] = None,
@@ -494,25 +480,25 @@ class CellRake:
         """
         status_items = []
 
-        # Show most important status first
-        if self.model:
-            status_items.append("model=trained")
-
-        if self.segmented_data:
-            num_images = len(self.segmented_data.get("layers", {}))
-            status_items.append(f"segmented={num_images}")
-
-        if self.counts is not None:
-            status_items.append(f"analyzed={len(self.counts)}")
-
-        # Show paths with just the name, not full path
-        if self.image_folder:
-            folder_name = self.image_folder.name
-            status_items.append(f"images='{folder_name}'")
-
         # project_dir is always available now
         project_name = self.project_dir.name
         status_items.append(f"project='{project_name}'")
+
+        if self.model:
+            status_items.append("model = trained")
+        else:
+            status_items.append("model = None")
+
+        if self.segmented_data:
+            num_images = len(self.segmented_data.get("layers", {}))
+            status_items.append(f"segmented = {num_images}")
+        else:
+            status_items.append("segmented = 0")
+
+        if self.counts is not None:
+            status_items.append(f"analyzed = {len(self.counts)}")
+        else:
+            status_items.append("analyzed = 0")
 
         status = ", ".join(status_items) if status_items else "empty"
         return f"CellRake({status})"

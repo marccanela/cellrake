@@ -141,7 +141,6 @@ def label_speading(
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
-    smote_strategy: str,
     label_spreading_kernel: str,
     random_state: int,
 ) -> pd.DataFrame:
@@ -158,8 +157,6 @@ def label_speading(
         Dictionary mapping image tags to 2D image arrays.
     samples : int
         Number of samples to manually label from each cluster.
-    smote_strategy : str
-        SMOTE sampling strategy for handling class imbalance.
     label_spreading_kernel : str
         Kernel type for label spreading algorithm.
     random_state : int
@@ -195,7 +192,7 @@ def label_speading(
     X_labeled_standardized = scaler.fit_transform(X_labeled)
 
     # Oversample the minority class
-    smote = SMOTE(sampling_strategy=smote_strategy, random_state=random_state)
+    smote = SMOTE(sampling_strategy="minority", random_state=random_state)
     X_resampled, y_resampled = smote.fit_resample(X_labeled_standardized, y_labeled)
 
     # Standardize the pool_X data
@@ -496,7 +493,6 @@ def handle_pseudo_labels(
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
-    smote_strategy: str,
     label_spreading_kernel: str,
     plot_entropy_threshold: float,
     plot_dpi: int,
@@ -517,8 +513,6 @@ def handle_pseudo_labels(
         Dictionary mapping image tags to 2D image arrays.
     samples : int
         Number of samples to manually label from each cluster.
-    smote_strategy : str
-        SMOTE sampling strategy for handling class imbalance.
     label_spreading_kernel : str
         Kernel type for label spreading algorithm.
     plot_entropy_threshold : float
@@ -538,7 +532,6 @@ def handle_pseudo_labels(
         rois,
         layers,
         samples,
-        smote_strategy,
         label_spreading_kernel,
         random_state,
     )
@@ -555,7 +548,6 @@ def handle_pseudo_labels(
 def create_subset_df(
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
-    clusters: int = 2,
     pca_variance_ratio: float = 0.95,
     random_state: int = 42,
 ) -> pd.DataFrame:
@@ -568,8 +560,6 @@ def create_subset_df(
         Dictionary mapping image tags to ROI dictionaries with coordinates.
     layers : Dict[str, np.ndarray]
         Dictionary mapping image tags to 2D image arrays.
-    clusters : int, default=2
-        Number of clusters for grouping features.
     pca_variance_ratio : float, default=0.95
         Proportion of variance to retain in PCA dimensionality reduction.
     random_state : int, default=42
@@ -608,7 +598,7 @@ def create_subset_df(
         [
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=pca_variance_ratio, random_state=random_state)),
-            ("kmeans", KMeans(n_clusters=clusters, random_state=random_state)),
+            ("kmeans", KMeans(n_clusters=2, random_state=random_state)),
         ]
     )
     best_clusters = kmeans_pipeline.fit_predict(features_df)
@@ -637,7 +627,6 @@ def train_classifier(
     max_test_samples: int = 1000,
     dataset_size_threshold: int = 2000,
     default_train_ratio: float = 0.8,
-    smote_strategy: str = "minority",
     label_spreading_kernel: str = "knn",
     plot_entropy_threshold: float = 0.2,
     plot_dpi: int = 300,
@@ -670,8 +659,6 @@ def train_classifier(
         Dataset size above which to use fixed sample limits.
     default_train_ratio : float, default=0.8
         Training ratio for standard train/test split on smaller datasets.
-    smote_strategy : str, default="minority"
-        SMOTE sampling strategy for handling class imbalance.
     label_spreading_kernel : str, default="knn"
         Kernel type for label spreading algorithm.
     plot_entropy_threshold : float, default=0.2
@@ -693,7 +680,6 @@ def train_classifier(
         rois,
         layers,
         samples,
-        smote_strategy,
         label_spreading_kernel,
         plot_entropy_threshold,
         plot_dpi,
