@@ -1,5 +1,6 @@
 # Created by: Marc Canela
 
+import math
 import pickle as pkl
 from pathlib import Path
 from typing import Dict
@@ -19,6 +20,14 @@ class CellRake:
         image_folder: Path,
         project_dir: Path,
         segmented_data: dict = None,
+        max_sigma: int = 15,
+        num_sigma: int = 10,
+        overlap: float = 0,
+        radius_expansion: float = 1.5 * math.sqrt(2),
+        min_area: int = 60,
+        max_area: int = 2000,
+        hole_fill_ratio: float = 0.8,
+        contour_level: float = 0.5,
     ):
         """
         Initialize a CellRake object.
@@ -31,6 +40,22 @@ class CellRake:
             Directory to save models and results.
         segmented_data : dict, optional
             Already segmented ROIs and layers (from a saved segmentation).
+        max_sigma : int, optional
+            Maximum standard deviation for LoG filter (default: 15).
+        num_sigma : int, optional
+            Number of intermediate values for LoG filter (default: 10).
+        overlap : float, optional
+            Minimum distance between blobs as fraction of radius (default: 0).
+        radius_expansion : float, optional
+            Factor to expand blob radius for mask creation (default: 1.5 * sqrt(2)).
+        min_area : int, optional
+            Minimum object area for cleaning (default: 60).
+        max_area : int, optional
+            Maximum object area for cleaning (default: 2000).
+        hole_fill_ratio : float, optional
+            Ratio for hole filling threshold (default: 0.8).
+        contour_level : float, optional
+            Level for contour extraction (default: 0.5).
         """
         self.image_folder: Path = image_folder
         self.segmented_data: Dict = segmented_data
@@ -39,6 +64,16 @@ class CellRake:
         self.metrics: Dict = None
         self.counts: pd.DataFrame = None
         self.features: pd.DataFrame = None
+
+        # Segmentation parameters
+        self.max_sigma = max_sigma
+        self.num_sigma = num_sigma
+        self.overlap = overlap
+        self.radius_expansion = radius_expansion
+        self.min_area = min_area
+        self.max_area = max_area
+        self.hole_fill_ratio = hole_fill_ratio
+        self.contour_level = contour_level
 
     def segment_images(self, threshold_rel: float):
         """
@@ -53,7 +88,18 @@ class CellRake:
             if self.image_folder is None:
                 raise ValueError("Please, define image_folder before segment_images.")
 
-            rois, layers = iterate_segmentation(self.image_folder, threshold_rel)
+            rois, layers = iterate_segmentation(
+                self.image_folder,
+                threshold_rel,
+                self.max_sigma,
+                self.num_sigma,
+                self.overlap,
+                self.radius_expansion,
+                self.min_area,
+                self.max_area,
+                self.hole_fill_ratio,
+                self.contour_level,
+            )
             self.segmented_data = {"rois": rois, "layers": layers}
             return self.segmented_data
 
