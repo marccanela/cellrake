@@ -1,6 +1,4 @@
-"""
-@author: Marc Canela
-"""
+# Created by: Marc Canela
 
 import math
 import pickle as pkl
@@ -10,12 +8,10 @@ from typing import Any, Dict, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-from scipy.ndimage import distance_transform_edt
-from skimage import draw, feature, filters, measure, morphology, segmentation
-from sklearn.cluster import KMeans
+from skimage import draw, feature, filters, measure, morphology
 from tqdm import tqdm
 
-from cellrake.utils import crop, crop_cell_large
+from cellrake.utils import crop
 
 
 def convert_to_roi(
@@ -230,203 +226,6 @@ def clean_binary_image(binary_image: np.ndarray, r: float) -> np.ndarray:
         return None
 
     return cleaned
-
-
-def preprocess_watershed(
-    combined_array: np.ndarray,
-    layer: np.ndarray,
-):
-
-    labels = measure.label(combined_array)
-    unique_labels = np.unique(labels)
-    watershed_array = np.zeros_like(combined_array)
-
-    # Compute background intensity
-    background_mask = 1 - combined_array
-    background_pixels = layer[background_mask == 1]
-    nonzero_background_pixels = background_pixels[background_pixels != 0]
-    mean_background = np.mean(nonzero_background_pixels)
-
-    n = 1
-
-    for mylabel in unique_labels:
-        if mylabel == 0:
-            continue
-
-        cleaned = labels == mylabel
-
-        # Compute the Euclidean distance transform of the binary image
-        distance = distance_transform_edt(cleaned)
-        distance = filters.gaussian(distance, sigma=1.0)
-
-        # Calculate the cell radius from the maximum distance
-        cell_radius = int(np.max(distance))
-        if cell_radius == 0:
-            continue
-
-        # Check Signal-to-Background Ratio (SBR)
-        intensities = layer[cleaned]
-        blob_intensity = np.mean(intensities)
-        sbr = blob_intensity / (mean_background if mean_background != 0 else 1)
-        if sbr > 1.5:
-            watershed_array[cleaned] = n
-            n += 1
-            continue
-
-        # Create a disk for footprint
-        disk = morphology.disk(int(cell_radius))
-
-        # Identify local maxima in the distance map for marker generation
-        actual_area = np.sum(cleaned)
-        single_area = np.sum(disk)
-        predicted_peaks = actual_area / single_area
-        if predicted_peaks < 1.5:
-            watershed_array[cleaned] = n
-            n += 1
-            continue
-
-        predicted_peaks = int(predicted_peaks) + 1
-
-        coords = feature.peak_local_max(
-            distance,
-            min_distance=cell_radius,
-            threshold_rel=0.6,
-            footprint=disk,
-            labels=measure.label(cleaned),
-            num_peaks_per_label=predicted_peaks,
-        )
-
-        if len(coords) == 1:
-            watershed_array[cleaned] = n
-            n += 1
-            continue
-
-        # Extract coordinates
-        contours = measure.find_contours(cleaned, level=0.5)
-        largest_contour = max(contours, key=lambda c: len(c))
-        polygons = {1: largest_contour}
-        roi = convert_to_roi(polygons, layer)
-        roi_info = roi["roi_1"]
-
-        # User validation before segmentation
-        user_input_value = user_input_watershed(cleaned, layer, roi_info)
-
-        if user_input_value == 1:
-            watershed_array[cleaned] = n
-            n += 1
-            continue
-
-        # Perform watershed
-        coords = np.column_stack(np.nonzero(cleaned))
-        kmeans = KMeans(n_clusters=user_input_value, random_state=42)
-        kmeans.fit(coords)
-        markers = np.zeros_like(cleaned, dtype=int)
-        for i, coord in enumerate(coords):
-            markers[tuple(coord)] = (
-                kmeans.labels_[i] + 1
-            )  # Assign cluster IDs as marker labels
-        watershed_labels = segmentation.watershed(-distance, markers, mask=cleaned)
-
-        # Adjust the obtained numbers
-        unique_watershed_labels = np.unique(watershed_labels)
-        mapping = {}
-        for watershed_label in unique_watershed_labels:
-            if watershed_label != 0:
-                mapping[watershed_label] = n
-                n += 1
-
-        new_labels = np.vectorize(lambda x: mapping.get(x, 0))(watershed_labels)
-
-        watershed_array = np.where(new_labels == 0, watershed_array, new_labels)
-
-    return watershed_array
-
-
-def user_input_watershed(
-    cleaned: np.ndarray, layer: np.ndarray, roi_info: Dict[str, Any]
-):
-
-    print("Enter the number of ROIs to be segmented in.")
-    print("Please enter an integer different from zero (1, 2...):\n")
-
-    x_coords, y_coords = roi_info["x"], roi_info["y"]
-
-    # Set up the plot with four subplots
-    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
-
-    # Full image with ROI highlighted
-    axes[0].imshow(layer, cmap="viridis")
-    axes[0].plot(x_coords, y_coords, "b-", linewidth=1)
-    axes[0].axis("off")  # Hide the axis
-
-    # Full image without ROI highlighted
-    axes[1].imshow(layer, cmap="viridis")
-    axes[1].axis("off")  # Hide the axis
-
-    # Cropped image with padding, ROI highlighted
-    layer_cropped_small, x_coords_cropped, y_coords_cropped = crop_cell_large(
-        layer, x_coords, y_coords, padding=120
-    )
-    axes[2].imshow(layer_cropped_small, cmap="viridis")
-    axes[2].plot(x_coords_cropped, y_coords_cropped, "b-", linewidth=1)
-    axes[2].axis("off")  # Hide the axis
-
-    # Cropped image without ROI highlighted
-    axes[3].imshow(layer_cropped_small, cmap="viridis")
-    axes[3].axis("off")  # Hide the axis
-
-    plt.tight_layout()
-    plt.show()
-    plt.pause(0.1)
-
-    # Ask for user input
-    while True:
-        try:
-            user_input_value = int(
-                input("Please enter an integer different from zero (1, 2...):\n")
-            )
-            if user_input_value != 0:
-                break
-            else:
-                print("Invalid input. Zero is not allowed.")
-        except ValueError:
-            print("Invalid input. Please enter a valid integer.")
-
-    plt.close(fig)
-
-    return user_input_value
-
-
-def global_watershed(layer: np.ndarray):
-
-    print("Do you want to apply watershed in this image?")
-    print("Please enter yes (y) or no (n):\n")
-
-    # Set up the plot with four subplots
-    fig, ax = plt.subplots(1, 1, figsize=(4, 5))
-
-    # Full image without ROI highlighted
-    ax.imshow(layer, cmap="viridis")
-    ax.axis("off")  # Hide the axis
-
-    plt.tight_layout()
-    plt.show()
-    plt.pause(0.1)
-
-    # Ask for user input
-    while True:
-        try:
-            user_input_value = input("Please enter yes (y) or no (n):")
-            if user_input_value in ["y", "n"]:
-                break
-            else:
-                print("Invalid input. Please enter yes (y) or no (n).")
-        except ValueError:
-            print("Invalid input. Please enter yes (y) or no (n).")
-
-    plt.close(fig)
-
-    return user_input_value
 
 
 def extract_polygons(labels: np.ndarray) -> Dict[int, List]:

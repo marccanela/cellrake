@@ -1,6 +1,4 @@
-"""
-@author: Marc Canela
-"""
+# Created by: Marc Canela
 
 import pickle as pkl
 from pathlib import Path
