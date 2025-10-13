@@ -20,6 +20,7 @@ class CellRake:
         image_folder: Path,
         project_dir: Path,
         segmented_data: dict = None,
+        # Segmentation hyperparameters
         max_sigma: int = 15,
         num_sigma: int = 10,
         overlap: float = 0,
@@ -28,6 +29,19 @@ class CellRake:
         max_area: int = 2000,
         hole_fill_ratio: float = 0.8,
         contour_level: float = 0.5,
+        # Training hyperparameters
+        clusters: int = 2,
+        pca_variance_ratio: float = 0.95,
+        entropy_threshold: float = 0.025,
+        max_train_samples: int = 1000,
+        max_test_samples: int = 1000,
+        dataset_size_threshold: int = 2000,
+        default_train_ratio: float = 0.8,
+        smote_strategy: str = "minority",
+        label_spreading_kernel: str = "knn",
+        plot_entropy_threshold: float = 0.2,
+        plot_dpi: int = 300,
+        random_state: int = 42,
     ):
         """
         Initialize a CellRake object.
@@ -40,22 +54,52 @@ class CellRake:
             Directory to save models and results.
         segmented_data : dict, optional
             Already segmented ROIs and layers (from a saved segmentation).
-        max_sigma : int, optional
-            Maximum standard deviation for LoG filter (default: 15).
-        num_sigma : int, optional
-            Number of intermediate values for LoG filter (default: 10).
-        overlap : float, optional
-            Minimum distance between blobs as fraction of radius (default: 0).
-        radius_expansion : float, optional
-            Factor to expand blob radius for mask creation (default: 1.5 * sqrt(2)).
-        min_area : int, optional
-            Minimum object area for cleaning (default: 60).
-        max_area : int, optional
-            Maximum object area for cleaning (default: 2000).
-        hole_fill_ratio : float, optional
-            Ratio for hole filling threshold (default: 0.8).
-        contour_level : float, optional
-            Level for contour extraction (default: 0.5).
+
+        Segmentation Parameters
+        ----------------------
+        max_sigma : int, default=15
+            Maximum standard deviation for LoG filter.
+        num_sigma : int, default=10
+            Number of intermediate values for LoG filter.
+        overlap : float, default=0
+            Minimum distance between blobs as fraction of radius.
+        radius_expansion : float, default=1.5*sqrt(2)
+            Factor to expand blob radius for mask creation.
+        min_area : int, default=60
+            Minimum object area for cleaning.
+        max_area : int, default=2000
+            Maximum object area for cleaning.
+        hole_fill_ratio : float, default=0.8
+            Ratio for hole filling threshold.
+        contour_level : float, default=0.5
+            Level for contour extraction.
+
+        Training Parameters
+        ------------------
+        clusters : int, default=2
+            Number of clusters for grouping features.
+        pca_variance_ratio : float, default=0.95
+            Proportion of variance to retain in PCA dimensionality reduction.
+        entropy_threshold : float, default=0.025
+            Confidence threshold for pseudo-label selection based on entropy.
+        max_train_samples : int, default=1000
+            Maximum number of training samples when dataset is large.
+        max_test_samples : int, default=1000
+            Maximum number of testing samples when dataset is large.
+        dataset_size_threshold : int, default=2000
+            Dataset size above which to use fixed sample limits.
+        default_train_ratio : float, default=0.8
+            Training ratio for standard train/test split on smaller datasets.
+        smote_strategy : str, default="minority"
+            SMOTE sampling strategy for handling class imbalance.
+        label_spreading_kernel : str, default="knn"
+            Kernel type for label spreading algorithm.
+        plot_entropy_threshold : float, default=0.2
+            Entropy threshold for plot visualization confidence.
+        plot_dpi : int, default=300
+            DPI resolution for saved plots.
+        random_state : int, default=42
+            Random seed for reproducibility.
         """
         self.image_folder: Path = image_folder
         self.segmented_data: Dict = segmented_data
@@ -74,6 +118,20 @@ class CellRake:
         self.max_area = max_area
         self.hole_fill_ratio = hole_fill_ratio
         self.contour_level = contour_level
+
+        # Training parameters
+        self.clusters = clusters
+        self.pca_variance_ratio = pca_variance_ratio
+        self.entropy_threshold = entropy_threshold
+        self.max_train_samples = max_train_samples
+        self.max_test_samples = max_test_samples
+        self.dataset_size_threshold = dataset_size_threshold
+        self.default_train_ratio = default_train_ratio
+        self.smote_strategy = smote_strategy
+        self.label_spreading_kernel = label_spreading_kernel
+        self.plot_entropy_threshold = plot_entropy_threshold
+        self.plot_dpi = plot_dpi
+        self.random_state = random_state
 
     def segment_images(self, threshold_rel: float):
         """
@@ -104,20 +162,128 @@ class CellRake:
             return self.segmented_data
 
     def train(
-        self, threshold_rel: float = 0.1, model_type: str = "rf", samples: int = 10
+        self,
+        threshold_rel: float = 0.1,
+        model_type: str = "rf",
+        samples: int = 10,
+        # Optional parameter overrides
+        clusters: int = None,
+        pca_variance_ratio: float = None,
+        entropy_threshold: float = None,
+        max_train_samples: int = None,
+        max_test_samples: int = None,
+        dataset_size_threshold: int = None,
+        default_train_ratio: float = None,
+        smote_strategy: str = None,
+        label_spreading_kernel: str = None,
+        plot_entropy_threshold: float = None,
+        plot_dpi: int = None,
+        random_state: int = None,
     ):
         """
-        Train a model using active learning on the segmented images.
-        """
-        seg = self.segment_images(threshold_rel)
-        subset_df = create_subset_df(seg["rois"], seg["layers"], samples)
+        Train a model using semi-supervised learning on the segmented images.
 
-        model, metrics_combined = train_classifier(
-            subset_df, seg["rois"], seg["layers"], samples, model_type, self.project_dir
+        Parameters
+        ----------
+        threshold_rel : float, default=0.1
+            Threshold for segmentation.
+        model_type : str, default="rf"
+            Type of model to train ('svm', 'rf', 'et', or 'logreg').
+        samples : int, default=10
+            Number of samples to draw from each cluster for initial labeling.
+
+        All other parameters are optional overrides of the instance defaults.
+        If provided, they will update the instance values permanently.
+        If not provided, the values from __init__ will be used.
+        """
+        # Update instance hyperparameters with any provided overrides
+        if clusters is not None:
+            self.clusters = clusters
+        if pca_variance_ratio is not None:
+            self.pca_variance_ratio = pca_variance_ratio
+        if entropy_threshold is not None:
+            self.entropy_threshold = entropy_threshold
+        if max_train_samples is not None:
+            self.max_train_samples = max_train_samples
+        if max_test_samples is not None:
+            self.max_test_samples = max_test_samples
+        if dataset_size_threshold is not None:
+            self.dataset_size_threshold = dataset_size_threshold
+        if default_train_ratio is not None:
+            self.default_train_ratio = default_train_ratio
+        if smote_strategy is not None:
+            self.smote_strategy = smote_strategy
+        if label_spreading_kernel is not None:
+            self.label_spreading_kernel = label_spreading_kernel
+        if plot_entropy_threshold is not None:
+            self.plot_entropy_threshold = plot_entropy_threshold
+        if plot_dpi is not None:
+            self.plot_dpi = plot_dpi
+        if random_state is not None:
+            self.random_state = random_state
+
+        seg = self.segment_images(threshold_rel)
+
+        # Create subset with feature extraction and clustering
+        subset_df = create_subset_df(
+            seg["rois"],
+            seg["layers"],
+            clusters=self.clusters,
+            pca_variance_ratio=self.pca_variance_ratio,
+            random_state=self.random_state,
         )
+
+        # Train classifier with current hyperparameters
+        model, metrics_combined = train_classifier(
+            subset_df,
+            seg["rois"],
+            seg["layers"],
+            samples,
+            model_type,
+            self.project_dir,
+            entropy_threshold=self.entropy_threshold,
+            max_train_samples=self.max_train_samples,
+            max_test_samples=self.max_test_samples,
+            dataset_size_threshold=self.dataset_size_threshold,
+            default_train_ratio=self.default_train_ratio,
+            smote_strategy=self.smote_strategy,
+            label_spreading_kernel=self.label_spreading_kernel,
+            plot_entropy_threshold=self.plot_entropy_threshold,
+            plot_dpi=self.plot_dpi,
+            random_state=self.random_state,
+        )
+
         self.model = model
         self.metrics = metrics_combined
         print("Model trained successfully.")
+
+    def get_hyperparameters(self) -> Dict:
+        """
+        Get current hyperparameter values for training.
+
+        Returns
+        -------
+        Dict
+            Dictionary containing all current hyperparameter values.
+        """
+        return {
+            # Feature extraction parameters
+            "clusters": self.clusters,
+            "pca_variance_ratio": self.pca_variance_ratio,
+            "random_state": self.random_state,
+            # Training parameters
+            "entropy_threshold": self.entropy_threshold,
+            "max_train_samples": self.max_train_samples,
+            "max_test_samples": self.max_test_samples,
+            "dataset_size_threshold": self.dataset_size_threshold,
+            "default_train_ratio": self.default_train_ratio,
+            # Semi-supervised learning parameters
+            "smote_strategy": self.smote_strategy,
+            "label_spreading_kernel": self.label_spreading_kernel,
+            # Visualization parameters
+            "plot_entropy_threshold": self.plot_entropy_threshold,
+            "plot_dpi": self.plot_dpi,
+        }
 
     def save_model(self, filename: str):
         """Save the trained model with a custom name."""
