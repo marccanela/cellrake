@@ -1,15 +1,13 @@
 # Created by: Marc Canela
 
-import pickle as pkl
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from scipy.stats import entropy
-from sklearn.base import clone
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
@@ -26,7 +24,7 @@ from cellrake.utils import (
 )
 
 
-def user_input(roi_values: np.ndarray, layer: np.ndarray) -> Dict[str, Dict[str, int]]:
+def user_input(roi_values: Dict[str, np.ndarray], layer: np.ndarray) -> str:
     """
     This function visually displays each ROI overlaid on the image layer and
     prompts the user to classify the ROI as either a cell (1) or non-cell (0).
@@ -207,7 +205,12 @@ def manual_labeling(
     return labels_df
 
 
-def label_speading(subset_df, rois, layers, samples):
+def label_speading(
+    subset_df: pd.DataFrame,
+    rois: Dict[str, dict],
+    layers: Dict[str, np.ndarray],
+    samples: int,
+) -> pd.DataFrame:
 
     # Identify the nature of the clusters
     pool_X = subset_df.copy()
@@ -279,7 +282,7 @@ def label_speading(subset_df, rois, layers, samples):
     return total_df
 
 
-def plot_pca(total_df, project_folder):
+def plot_pca(total_df: pd.DataFrame, project_folder: Union[str, Path]) -> None:
 
     # Create colormaps
     pastel1_colors = ["#fbb4ae", "#b3cde3"]  # First two colors of Pastel1
@@ -373,7 +376,15 @@ def plot_pca(total_df, project_folder):
     plt.close()
 
 
-def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_folder):
+def plot_pca_train_test(
+    total_df: pd.DataFrame,
+    X: np.ndarray,
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    project_folder: Union[str, Path],
+) -> None:
 
     # Reduce to 2D using PCA
     pipeline = Pipeline(
@@ -457,7 +468,13 @@ def plot_pca_train_test(total_df, X, X_train, X_test, y_train, y_test, project_f
     plt.close()
 
 
-def handle_pseudo_labels(project_folder, subset_df, rois, layers, samples):
+def handle_pseudo_labels(
+    project_folder: Union[str, Path],
+    subset_df: pd.DataFrame,
+    rois: Dict[str, dict],
+    layers: Dict[str, np.ndarray],
+    samples: int,
+) -> pd.DataFrame:
 
     total_df = label_speading(subset_df, rois, layers, samples)
     plot_pca(total_df, project_folder)
@@ -471,7 +488,7 @@ def train_classifier(
     layers: Dict[str, np.ndarray],
     samples: int,
     model_type: str,
-    project_folder: Path,
+    project_folder: Union[str, Path],
 ) -> Tuple[Pipeline, pd.DataFrame]:
     """
     The function begins by splitting the dataset into training and testing sets, with a small
