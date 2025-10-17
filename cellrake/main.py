@@ -285,7 +285,6 @@ class CellRake:
         with open(filepath, "wb") as file:
             pkl.dump(self.model, file)
         print(f"Model saved as {filepath}")
-        return filepath
 
     def load_model(self, filename: str) -> BaseEstimator:
         """
@@ -308,7 +307,6 @@ class CellRake:
         with open(filepath, "rb") as file:
             self.model = pkl.load(file)
         print(f"Model loaded successfully from {filepath}")
-        return self.model
 
     def save_segmentation(self, filename: str) -> Path:
         """
@@ -331,7 +329,6 @@ class CellRake:
         with open(filepath, "wb") as file:
             pkl.dump(self.segmented_data, file)
         print(f"Segmentation saved as {filepath}")
-        return filepath
 
     def load_segmentation(self, filename: str) -> dict:
         """
@@ -354,7 +351,6 @@ class CellRake:
         with open(filepath, "rb") as file:
             self.segmented_data = pkl.load(file)
         print(f"Segmentation loaded successfully from {filepath}")
-        return self.segmented_data
 
     def analyze(
         self,
