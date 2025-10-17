@@ -30,7 +30,9 @@ dependencies = [
     "tqdm",
     "openpyxl",
     "scipy",
-    "scikit-image"
+    "scikit-image",
+    "numpy",
+    "imbalanced-learn"
 ]
 
 [project.optional-dependencies]
