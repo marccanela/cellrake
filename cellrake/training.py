@@ -336,7 +336,7 @@ def plot_pca(
     plt.scatter(
         X_negative_pseudo[:, 0],
         X_negative_pseudo[:, 1],
-        color=pastel1_colors[1],
+        color=set1_colors[1],
         marker="x",
         label="Negative Pseudo-labeled",
     )
@@ -347,7 +347,7 @@ def plot_pca(
     plt.scatter(
         X_positive_pseudo[:, 0],
         X_positive_pseudo[:, 1],
-        color=pastel1_colors[0],
+        color=set1_colors[0],
         marker="x",
         label="Positive Pseudo-labeled",
     )
