@@ -131,7 +131,7 @@ class CellRake:
         self,
         threshold_rel: float = 0.1,
         model_type: str = "rf",
-        samples: int = 10,
+        samples: int = 25, # 2 clusetrs x "samples" to label in each
         # Segmentation parameters (if you want to use different segmentation for training)
         max_sigma: Optional[int] = None,
         num_sigma: Optional[int] = None,
@@ -144,9 +144,7 @@ class CellRake:
         # Training parameters
         pca_variance_ratio: Optional[float] = None,
         entropy_threshold: Optional[float] = None,
-        max_train_samples: Optional[int] = None,
         max_test_samples: Optional[int] = None,
-        dataset_size_threshold: Optional[int] = None,
         default_train_ratio: Optional[float] = None,
         label_spreading_kernel: Optional[str] = None,
         plot_entropy_threshold: Optional[float] = None,
@@ -184,12 +182,8 @@ class CellRake:
             Proportion of variance to retain in PCA.
         entropy_threshold : float, optional
             Confidence threshold for pseudo-label selection.
-        max_train_samples : int, optional
-            Maximum number of training samples.
         max_test_samples : int, optional
             Maximum number of testing samples.
-        dataset_size_threshold : int, optional
-            Dataset size threshold for sampling strategy.
         default_train_ratio : float, optional
             Training ratio for train/test split.
         label_spreading_kernel : str, optional
@@ -224,11 +218,13 @@ class CellRake:
         if random_state is not None:
             subset_args["random_state"] = random_state
 
-        subset_df = create_subset_df(**subset_args)
+        df_train, df_val, df_test = create_subset_df(**subset_args)
 
         # Train classifier with hyperparameters
         train_args = {
-            "subset_df": subset_df,
+            "df_train": df_train,
+            "df_val": df_val,
+            "df_test": df_test,
             "rois": seg["rois"],
             "layers": seg["layers"],
             "samples": samples,
@@ -239,12 +235,8 @@ class CellRake:
         # Add training parameters if provided
         if entropy_threshold is not None:
             train_args["entropy_threshold"] = entropy_threshold
-        if max_train_samples is not None:
-            train_args["max_train_samples"] = max_train_samples
         if max_test_samples is not None:
             train_args["max_test_samples"] = max_test_samples
-        if dataset_size_threshold is not None:
-            train_args["dataset_size_threshold"] = dataset_size_threshold
         if default_train_ratio is not None:
             train_args["default_train_ratio"] = default_train_ratio
         if label_spreading_kernel is not None:

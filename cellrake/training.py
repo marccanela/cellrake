@@ -85,7 +85,7 @@ def user_input(
 
     plt.close(fig)
 
-    return user_input_value
+    return int(user_input_value)
 
 
 def manual_labeling(
@@ -137,7 +137,9 @@ def manual_labeling(
 
 
 def label_speading(
-    subset_df: pd.DataFrame,
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
@@ -149,8 +151,12 @@ def label_speading(
 
     Parameters
     ----------
-    subset_df : pd.DataFrame
-        DataFrame with features and cluster assignments.
+    df_train : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for training.
+    df_val : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for validation.
+    df_test : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for testing.
     rois : Dict[str, dict]
         Dictionary mapping image tags to ROI dictionaries with coordinates.
     layers : Dict[str, np.ndarray]
@@ -164,77 +170,96 @@ def label_speading(
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with pseudo-labels and confidence metrics.
+    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        DataFrames with ROI features, cluster assignments, and pseudo-labels for training, validation, and testing.
     """
-    # Identify the nature of the clusters
-    pool_X = subset_df.copy()
-
+    # Add dummy labels to the dfs
+    df_train['labels'] = -1
+    df_val['labels'] = -1
+    df_test['labels'] = -1
+    
     # Explore and label the clusters
     exploratory_dfs = []
-    for cluster in pool_X["cluster"].unique():
-        cluster_df = pool_X[pool_X["cluster"] == cluster]
+    for cluster in df_train["cluster"].unique():
+        cluster_df = df_train[df_train["cluster"] == cluster]
         if len(cluster_df) >= samples:
             sampled_df = cluster_df.sample(n=samples, random_state=random_state)
         else:
             sampled_df = cluster_df
         exploratory_dfs.append(sampled_df)
 
+    # Combine exploratory samples and manual labeling
     exploratory_df = pd.concat(exploratory_dfs)
     exploratory_df_labeled = manual_labeling(exploratory_df, rois, layers)
+    
+    # Add manual labels to df_train
+    labeled_series = exploratory_df_labeled['label_column'].astype(int)
+    df_train.loc[labeled_series.index, 'labels'] = labeled_series
 
-    # Extract labelled features and labels
-    X_labeled = exploratory_df.drop(columns="cluster").values
-    y_labeled = exploratory_df_labeled["label_column"].values.astype(int)
-
-    # Standardize the labeled data
-    scaler = StandardScaler()
-    X_labeled_standardized = scaler.fit_transform(X_labeled)
-
-    # Oversample the minority class
+    # Standarize features
+    scaler = StandardScaler() # Always returns a NumPy array
+    features_to_scale = [col for col in df_train.columns if col not in ['cluster', 'labels']]
+    
+    X_train_scaled = scaler.fit_transform(df_train[features_to_scale]) # (Fit on df_train)
+    X_val_scaled = scaler.transform(df_val[features_to_scale])
+    X_test_scaled = scaler.transform(df_test[features_to_scale])
+    
+    # Apply SMOTE to balance the labeled data
+    labeled_mask = df_train['labels'] != -1
+    X_labeled = X_train_scaled[labeled_mask]
+    y_labeled = df_train.loc[labeled_mask, 'labels'].astype(int)
     smote = SMOTE(sampling_strategy="minority", random_state=random_state)
-    X_resampled, y_resampled = smote.fit_resample(X_labeled_standardized, y_labeled)
+    X_resampled, y_resampled = smote.fit_resample(X_labeled, y_labeled)
+    
+    # Create new training set with resampled labeled data and unlabeled pool
+    X_pool = X_train_scaled[~labeled_mask]
+    X_train_scaled_smoted = np.vstack([X_resampled, X_pool])
+    y_train_smoted = np.hstack([y_resampled, [-1]*len(X_pool)])
 
-    # Standardize the pool_X data
-    X_pool = pool_X.drop(columns="cluster").values
-    X_pool_standardized = scaler.transform(X_pool)  # Use the same scaler as above
-
-    # Combine the resampled labeled data with the standardized pool_X (unlabeled data)
-    X_combined = np.vstack((X_resampled, X_pool_standardized))
-    y_combined = np.concatenate([y_resampled, [-1] * len(X_pool)])
-
-    # Initialize and fit the LabelSpreading model
+    # Fit LabelSpreading (Fit on df_train)
     ls = LabelSpreading(kernel=label_spreading_kernel)
-    ls.fit(X_combined, y_combined)
+    ls.fit(X_train_scaled_smoted, y_train_smoted)
 
-    # Separate back into labeled and pool data
-    labels_combined = ls.transduction_
-    labels_pool = labels_combined[len(X_resampled) :]
+    # Generate pseudo-labels for all three sets
+    data_sets = {
+        'train': {
+            'df': df_train,
+            'X_scaled': X_train_scaled,
+        },
+        'val': {
+            'df': df_val,
+            'X_scaled': X_val_scaled,
+        },
+        'test': {
+            'df': df_test,
+            'X_scaled': X_test_scaled,
+        },
+    }
+    
+    subset_dfs = []
+    for subset in data_sets.values():
+        df = subset['df']
+        X_scaled = subset['X_scaled']
+        
+        # Predict labels using the trained LabelSpreading model
+        predicted_labels = ls.predict(X_scaled)
+        
+        # Compute probabilities of predictions
+        subset_probabilities = ls.predict_proba(X_scaled)
+        label_entropy = entropy(subset_probabilities, base=2, axis=1)
+        # Entropy = 1.0 is maximum uncertainty (random guess)
+        # Entropy = 0.0 is minimum uncertainty (full confidence)
+        is_zero_prob = np.all(subset_probabilities == [0, 0], axis=1)
+        
+        # Create new df
+        subset_df = df.copy()
+        subset_df["labels"] = predicted_labels
+        subset_df["label_entropy"] = label_entropy
+        subset_df["is_zero_prob"] = is_zero_prob
+        
+        subset_dfs.append(subset_df)
 
-    # Compute probabilities
-    probabilities = ls.label_distributions_
-    pool_probabilities = probabilities[len(X_resampled) :]
-    is_zero_probabilities = np.all(pool_probabilities == [0, 0], axis=1)
-    myentropy = entropy(pool_probabilities.T, axis=0)
-
-    # Create new total_df
-    total_df = subset_df.copy()
-    total_df["labels"] = labels_pool
-    total_df["is_zero_prob"] = is_zero_probabilities
-    total_df["myentropy"] = myentropy
-
-    # Keep original manually labelled
-    exploratory_df_labeled["label_column"] = exploratory_df_labeled[
-        "label_column"
-    ].astype(int)
-    for idx in exploratory_df_labeled.index:
-        if idx in total_df.index:
-            total_df.at[idx, "labels"] = exploratory_df_labeled.at[idx, "label_column"]
-    total_df["manual"] = False
-    common_indices = total_df.index.intersection(exploratory_df_labeled.index)
-    total_df.loc[common_indices, "manual"] = True
-
-    return total_df
+    return subset_dfs[0], subset_dfs[1], subset_dfs[2]
 
 
 # ================================================================================
@@ -243,6 +268,7 @@ def label_speading(
 
 
 def plot_pca(
+    tag: str,
     total_df: pd.DataFrame,
     project_folder: Union[str, Path],
     entropy_threshold: float,
@@ -254,6 +280,8 @@ def plot_pca(
 
     Parameters
     ----------
+    tag : str
+        Tag for the dataset (e.g., "Train", "Validation", "Test").
     total_df : pd.DataFrame
         DataFrame with features, labels, and confidence metrics.
     project_folder : Union[str, Path]
@@ -281,7 +309,7 @@ def plot_pca(
         ]
     )
     X = total_df.drop(
-        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+        columns=["cluster", "labels", "is_zero_prob", "label_entropy"]
     ).values
     X = pipeline.fit_transform(X)
 
@@ -289,7 +317,7 @@ def plot_pca(
     loading_scores = pipeline.named_steps["pca"].components_
     max_contributing_features = np.argmax(np.abs(loading_scores), axis=1)
     feature_names = total_df.drop(
-        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
+        columns=["cluster", "labels", "is_zero_prob", "label_entropy"]
     ).columns
     most_contributing_features = [feature_names[i] for i in max_contributing_features]
 
@@ -297,14 +325,13 @@ def plot_pca(
     label_0 = total_df.labels == 0
     label_1 = total_df.labels == 1
     correct_prob = total_df.is_zero_prob == False
-    confident = total_df.myentropy < entropy_threshold
-    manual = total_df.manual == True
+    confident = total_df.label_entropy < entropy_threshold
 
     # Plot the data points
     plt.figure()
 
     # Negative pseudo-labeled
-    mask_negative_pseudo = label_0 & correct_prob & confident & ~manual
+    mask_negative_pseudo = label_0 & correct_prob & confident
     X_negative_pseudo = X[mask_negative_pseudo]
     plt.scatter(
         X_negative_pseudo[:, 0],
@@ -315,7 +342,7 @@ def plot_pca(
     )
 
     # Positive pseudo-labeled
-    mask_positive_pseudo = label_1 & correct_prob & confident & ~manual
+    mask_positive_pseudo = label_1 & correct_prob & confident
     X_positive_pseudo = X[mask_positive_pseudo]
     plt.scatter(
         X_positive_pseudo[:, 0],
@@ -325,159 +352,14 @@ def plot_pca(
         label="Positive Pseudo-labeled",
     )
 
-    # Negative labeled
-    mask_negative_manual = label_0 & manual
-    X_negative_manual = X[mask_negative_manual]
-    plt.scatter(
-        X_negative_manual[:, 0],
-        X_negative_manual[:, 1],
-        color=set1_colors[1],
-        edgecolors="k",
-        marker="o",
-        label="Negative Labeled",
-    )
-
-    # Positive labeled
-    mask_positive_manual = label_1 & manual
-    X_positive_manual = X[mask_positive_manual]
-    plt.scatter(
-        X_positive_manual[:, 0],
-        X_positive_manual[:, 1],
-        color=set1_colors[0],
-        edgecolors="k",
-        marker="o",
-        label="Positive Labeled",
-    )
-
     # Add legend and title
     plt.legend()
-    plt.title("2D PCA Visualization of Labeled and Pseudo-labeled Data")
+    plt.title(f"2D PCA of Pseudo-labeled Data in the {tag} Set")
     plt.xlabel(f"PC1 ({most_contributing_features[0]})")
     plt.ylabel(f"PC2 ({most_contributing_features[1]})")
 
     # Save the plot as a PNG file
-    output_path = f"{project_folder}/pca_label_spreading.png"
-    plt.savefig(output_path, dpi=plot_dpi, bbox_inches="tight")
-    plt.close()
-
-
-def plot_pca_train_test(
-    total_df: pd.DataFrame,
-    X: np.ndarray,
-    X_train: np.ndarray,
-    X_test: np.ndarray,
-    y_train: np.ndarray,
-    y_test: np.ndarray,
-    project_folder: Union[str, Path],
-    plot_dpi: int,
-    random_state: int,
-) -> None:
-    """
-    Create 2D PCA visualization of training and testing data splits.
-
-    Parameters
-    ----------
-    total_df : pd.DataFrame
-        DataFrame with features for determining feature names.
-    X : np.ndarray
-        Complete feature array for fitting PCA.
-    X_train : np.ndarray
-        Training feature array.
-    X_test : np.ndarray
-        Testing feature array.
-    y_train : np.ndarray
-        Training labels.
-    y_test : np.ndarray
-        Testing labels.
-    project_folder : Union[str, Path]
-        Path to project folder for saving the plot.
-    plot_dpi : int
-        DPI resolution for saved plot.
-    random_state : int
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    None
-    """
-    # Reduce to 2D using PCA
-    pipeline = Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            ("pca", PCA(n_components=2, random_state=random_state)),
-        ]
-    )
-    pipeline.fit(X)
-    X_2d_train = pipeline.transform(X_train)
-    X_2d_test = pipeline.transform(X_test)
-
-    # Create colormaps
-    set1_colors = ["#e41a1c", "#377eb8"]  # First two colors of Set1
-
-    # Rotated loading scores
-    loading_scores = pipeline.named_steps["pca"].components_
-    max_contributing_features = np.argmax(np.abs(loading_scores), axis=1)
-    feature_names = total_df.drop(
-        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
-    ).columns
-    most_contributing_features = [feature_names[i] for i in max_contributing_features]
-
-    # Build masks
-    label_0_train = y_train == 0
-    label_1_train = y_train == 1
-    label_0_test = y_test == 0
-    label_1_test = y_test == 1
-
-    # Negative Test
-    X_2d_test_0 = X_2d_test[label_0_test]
-    plt.scatter(
-        X_2d_test_0[:, 0],
-        X_2d_test_0[:, 1],
-        color=set1_colors[1],
-        marker="x",
-        label="Negative Test",
-    )
-
-    # Positive Test
-    X_2d_test_1 = X_2d_test[label_1_test]
-    plt.scatter(
-        X_2d_test_1[:, 0],
-        X_2d_test_1[:, 1],
-        color=set1_colors[0],
-        marker="x",
-        label="Positive Test",
-    )
-
-    # Negative Train
-    X_2d_train_0 = X_2d_train[label_0_train]
-    plt.scatter(
-        X_2d_train_0[:, 0],
-        X_2d_train_0[:, 1],
-        color=set1_colors[1],
-        edgecolors="k",
-        marker="o",
-        label="Negative Train",
-    )
-
-    # Positive Train
-    X_2d_train_1 = X_2d_train[label_1_train]
-    plt.scatter(
-        X_2d_train_1[:, 0],
-        X_2d_train_1[:, 1],
-        color=set1_colors[0],
-        edgecolors="k",
-        marker="o",
-        label="Positive Train",
-    )
-
-    # Add legend and title
-    plt.legend()
-    plt.title("2D PCA Visualization of Train-Test")
-    plt.xlabel(f"PC1 ({most_contributing_features[0]})")
-    plt.ylabel(f"PC2 ({most_contributing_features[1]})")
-
-    # Save the plot as a PNG file
-    output_path = f"{project_folder}/pca_train_test.png"
+    output_path = f"{project_folder}/pca_pseudolabels_{tag}.png"
     plt.savefig(output_path, dpi=plot_dpi, bbox_inches="tight")
     plt.close()
 
@@ -489,7 +371,9 @@ def plot_pca_train_test(
 
 def handle_pseudo_labels(
     project_folder: Union[str, Path],
-    subset_df: pd.DataFrame,
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
@@ -505,8 +389,12 @@ def handle_pseudo_labels(
     ----------
     project_folder : Union[str, Path]
         Path to project folder for saving plots.
-    subset_df : pd.DataFrame
-        DataFrame with features and cluster assignments.
+    df_train : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for training.
+    df_val : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for validation.
+    df_test : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for testing.
     rois : Dict[str, dict]
         Dictionary mapping image tags to ROI dictionaries with coordinates.
     layers : Dict[str, np.ndarray]
@@ -524,20 +412,26 @@ def handle_pseudo_labels(
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with pseudo-labels and confidence metrics.
+    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        DataFrames with ROI features, cluster assignments, and pseudo-labels for training, validation, and testing.
     """
-    total_df = label_speading(
-        subset_df,
+    df_train_labelled, df_val_labelled, df_test_labelled = label_speading(
+        df_train,
+        df_val,
+        df_test,
         rois,
         layers,
         samples,
         label_spreading_kernel,
         random_state,
     )
-    plot_pca(total_df, project_folder, plot_entropy_threshold, plot_dpi, random_state)
     print("Pseudo-labeled dataset generated.")
-    return total_df
+    
+    plot_pca("Train", df_train_labelled, project_folder, plot_entropy_threshold, plot_dpi, random_state)
+    plot_pca("Validation", df_val_labelled, project_folder, plot_entropy_threshold, plot_dpi, random_state)
+    plot_pca("Test", df_test_labelled, project_folder, plot_entropy_threshold, plot_dpi, random_state)
+    
+    return df_train_labelled, df_val_labelled, df_test_labelled
 
 
 # ================================================================================
@@ -567,8 +461,8 @@ def create_subset_df(
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with ROI features and cluster assignments.
+    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        DataFrames with ROI features and cluster assignments for training, validation, and testing.
     """
 
     # Extract statistical features from each ROI
@@ -592,8 +486,25 @@ def create_subset_df(
 
     if features_df.empty:
         raise ValueError("The features DataFrame is empty. Please provide a valid one.")
+    
+    # Ensure specific columns have the correct data types
+    features_df["min_intensity"] = features_df["min_intensity"].astype(int)
+    features_df["max_intensity"] = features_df["max_intensity"].astype(int)
+    features_df["hog_mean"] = features_df["hog_mean"].astype(float)
+    features_df["hog_std"] = features_df["hog_std"].astype(float)
+    
+    # Split into train-validation-test sets
+    n_rows = features_df.shape[0]
+    if n_rows < 1e6: # 70-15-15
+        test_size = 0.15
+        val_size = 0.15 / (1 - test_size)
+    else: # 90-5-5
+        test_size = 0.05
+        val_size = 0.05 / (1 - test_size)
+    
+    df_train_temp, df_test = train_test_split(features_df, test_size=test_size, random_state=random_state)
 
-    # Cluster the features to aproximate the positive/negative classes
+    # Cluster the features to aproximate the positive/negative classes (in df_train_temp)
     kmeans_pipeline = Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -601,31 +512,30 @@ def create_subset_df(
             ("kmeans", KMeans(n_clusters=2, random_state=random_state)),
         ]
     )
-    best_clusters = kmeans_pipeline.fit_predict(features_df)
-    features_df["cluster"] = best_clusters
+    best_clusters = kmeans_pipeline.fit_predict(df_train_temp)
+    df_train_temp["cluster"] = best_clusters
+    
+    # Split df_train_temp into train and validation sets
+    df_train, df_val = train_test_split(df_train_temp, test_size=val_size, random_state=random_state, stratify=df_train_temp["cluster"])
+    
+    # Expand clustering to the test set
+    test_clusters = kmeans_pipeline.predict(df_test)
+    df_test["cluster"] = test_clusters
 
-    subset_df = features_df.copy()
-
-    # Ensure specific columns have the correct data types
-    subset_df["min_intensity"] = subset_df["min_intensity"].astype(int)
-    subset_df["max_intensity"] = subset_df["max_intensity"].astype(int)
-    subset_df["hog_mean"] = subset_df["hog_mean"].astype(float)
-    subset_df["hog_std"] = subset_df["hog_std"].astype(float)
-
-    return subset_df
+    return df_train, df_val, df_test
 
 
 def train_classifier(
-    subset_df: pd.DataFrame,
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
     rois: Dict[str, dict],
     layers: Dict[str, np.ndarray],
     samples: int,
     model_type: str,
     project_folder: Union[str, Path],
-    entropy_threshold: float = 0.025,
-    max_train_samples: int = 1000,
+    entropy_threshold: float = 0.036,
     max_test_samples: int = 1000,
-    dataset_size_threshold: int = 2000,
     default_train_ratio: float = 0.8,
     label_spreading_kernel: str = "knn",
     plot_entropy_threshold: float = 0.2,
@@ -637,8 +547,12 @@ def train_classifier(
 
     Parameters
     ----------
-    subset_df : pd.DataFrame
-        DataFrame with ROI features and cluster assignments.
+    df_train : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for training.
+    df_val : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for validation.
+    df_test : pd.DataFrame
+        DataFrame with ROI features and cluster assignments for testing.
     rois : Dict[str, dict]
         Dictionary mapping image tags to ROI dictionaries with coordinates.
     layers : Dict[str, np.ndarray]
@@ -649,14 +563,10 @@ def train_classifier(
         Type of model to train ('svm', 'rf', 'et', or 'logreg').
     project_folder : Union[str, Path]
         Path to project folder for saving results and models.
-    entropy_threshold : float, default=0.025
+    entropy_threshold : float, default=0.036
         Confidence threshold for pseudo-label selection based on entropy.
-    max_train_samples : int, default=1000
-        Maximum number of training samples when dataset is large.
     max_test_samples : int, default=1000
         Maximum number of testing samples when dataset is large.
-    dataset_size_threshold : int, default=2000
-        Dataset size above which to use fixed sample limits.
     default_train_ratio : float, default=0.8
         Training ratio for standard train/test split on smaller datasets.
     label_spreading_kernel : str, default="knn"
@@ -674,9 +584,11 @@ def train_classifier(
         Trained classifier pipeline and performance metrics DataFrame.
     """
     # Label spreading
-    total_df = handle_pseudo_labels(
+    df_train_labelled, df_val_labelled, df_test_labelled = handle_pseudo_labels(
         project_folder,
-        subset_df,
+        df_train,
+        df_val,
+        df_test,
         rois,
         layers,
         samples,
@@ -685,79 +597,45 @@ def train_classifier(
         plot_dpi,
         random_state,
     )
+    
+    # Create dictionary of dataframes
+    dataframes = {
+        "train": df_train_labelled,
+        "val": df_val_labelled,
+        "test": df_test_labelled,
+    }
 
-    # Prepare features and labels
-    print("Proceeding with the preliminar model...")
-    correct_prob = total_df.is_zero_prob == False
-    confident = total_df.myentropy < entropy_threshold
-    mask = correct_prob & confident
+    print("Proceeding with training the model...")
+    
+    processed_dfs = {}
+    
+    for tag, total_df in dataframes.items():
+        
+        # Build mask for confident pseudo-labels
+        correct_prob = total_df.is_zero_prob == False
+        confident = total_df.label_entropy < entropy_threshold
+        mask = correct_prob & confident
 
-    raw_features = total_df.drop(
-        columns=["cluster", "labels", "is_zero_prob", "myentropy", "manual"]
-    ).values
-    raw_labels = total_df.labels.values.astype(int)
-    raw_clusters = total_df.cluster.values.astype(int)
+        raw_features = total_df.drop(
+            columns=["cluster", "labels", "is_zero_prob", "label_entropy"] 
+        ).values
+        raw_labels = total_df.labels.values.astype(int)
 
-    X = raw_features[mask]
-    y = raw_labels[mask]
-    clusters = raw_clusters[mask]
-
-    # Split into train/test
-    length = len(X)
-
-    if length > dataset_size_threshold:
-        train_size = max_train_samples / length
-
-        # Initial split with proportional stratification
-        X_train, X_temp, y_train, y_temp, _, clusters_temp = train_test_split(
-            X,
-            y,
-            clusters,
-            train_size=train_size,
-            random_state=random_state,
-            stratify=clusters,
-        )
-
-        # Adjust the remaining temp data to ensure exactly max_test_samples samples for testing
-        test_size_adjusted = max_test_samples / len(X_temp)
-        X_test, _, y_test, _, _, _ = train_test_split(
-            X_temp,
-            y_temp,
-            clusters_temp,
-            train_size=test_size_adjusted,
-            random_state=random_state,
-            stratify=clusters_temp,
-        )
-    else:
-        # Standard train/test split
-        X_train, X_test, y_train, y_test, _, _ = train_test_split(
-            X,
-            y,
-            clusters,
-            train_size=default_train_ratio,
-            random_state=random_state,
-            stratify=clusters,
-        )
-
-    plot_pca_train_test(
-        total_df,
-        X,
-        X_train,
-        X_test,
-        y_train,
-        y_test,
-        project_folder,
-        plot_dpi,
-        random_state,
-    )
+        X = raw_features[mask]
+        y = raw_labels[mask]
+        
+        processed_dfs[tag] = {
+            "X": X,
+            "y": y,
+        }
 
     # Train classifier
-    best_model = train_model(X_train, y_train, model_type)
+    best_model = train_model(processed_dfs, model_type, random_state)
 
     # Evaluations
     print(f"Proceeding with evaluating the {model_type} classifier...")
-    metrics_train = evaluate_model(best_model, X_train, y_train)
-    metrics_test = evaluate_model(best_model, X_test, y_test)
+    metrics_train = evaluate_model(best_model, processed_dfs['train'])
+    metrics_test = evaluate_model(best_model, processed_dfs['test'])
     metrics_combined = pd.DataFrame({"Train": metrics_train, "Test": metrics_test})
     print(metrics_combined)
 

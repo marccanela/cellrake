@@ -411,16 +411,16 @@ def crop(layer: np.ndarray) -> np.ndarray:
     return layer
 
 
-def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
+def train_svm(processed_dfs: Dict, random_state: int) -> Pipeline:
     """
     Train an SVM model with hyperparameter tuning using RandomizedSearchCV.
 
     Parameters
     ----------
-    X_train : np.ndarray
-        Training features array.
-    y_train : np.ndarray
-        Training labels array.
+    processed_dfs : Dict
+        Dictionary containing processed data sets.
+    random_state : int, default=42
+        Random seed for reproducibility.
 
     Returns
     -------
@@ -428,25 +428,26 @@ def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
         Best SVM estimator found by random search.
     """
 
-    # Create a pipeline with scaling, PCA, and SVM
+    # Perform randomized search with cross-validation with the validation data
     pipeline_steps = [
         ("scaler", StandardScaler()),
-        ("pca", PCA(n_components=0.95, random_state=42)),
+        ("pca", PCA(n_components=0.95, random_state=random_state)),
         (
             "svm",
             SVC(
-                kernel="rbf", probability=True, class_weight="balanced", random_state=42
+                kernel="rbf", 
+                probability=True, 
+                class_weight="balanced", 
+                random_state=random_state
             ),
         ),
     ]
     pipeline = Pipeline(pipeline_steps)
 
-    # Define the distribution of hyperparameters for RandomizedSearchCV
     param_dist = {
         "svm__C": uniform(1, 100),  # Regularization parameter
     }
 
-    # Perform randomized search with cross-validation
     random_search = RandomizedSearchCV(
         pipeline,
         param_dist,
@@ -458,29 +459,44 @@ def train_svm(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
         error_score="raise",
     )
 
-    # Fit the model to the training data
-    random_search.fit(X_train, y_train)
+    random_search.fit(processed_dfs['val']['X'], processed_dfs['val']['y'])
+    best_params = random_search.best_params_
 
-    # Retrieve the best model from the random search
-    best_model = random_search.best_estimator_
+    # Perform training on the training set with the best parameters
+    final_pipeline_steps = [
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=0.95, random_state=random_state)),
+        (
+            "svm",
+            SVC(
+                kernel="rbf", 
+                probability=True, 
+                class_weight="balanced", 
+                random_state=random_state,
+                C=best_params['svm__C']
+            ),
+        ),
+    ]
+    final_model = Pipeline(final_pipeline_steps)
+    final_model.fit(processed_dfs['train']['X'], processed_dfs['train']['y'])
 
-    return best_model
+    return final_model
 
 
 def train_rf(
-    X_train: np.ndarray, y_train: np.ndarray, model_type: str = "rf"
+    processed_dfs: Dict, model_type: str, random_state : int
 ) -> Union[RandomForestClassifier, ExtraTreesClassifier]:
     """
     Train a Random Forest or Extra Trees classifier with hyperparameter tuning.
 
     Parameters
     ----------
-    X_train : np.ndarray
-        Training features array.
-    y_train : np.ndarray
-        Training labels array.
+    processed_dfs : Dict
+        Dictionary containing processed data sets.
     model_type : str
         Model type: 'rf' for Random Forest or 'et' for Extra Trees.
+    random_state : int, default=42
+        Random seed for reproducibility.
 
     Returns
     -------
@@ -489,52 +505,62 @@ def train_rf(
     """
 
     if model_type == "et":
-        rf = ExtraTreesClassifier(class_weight="balanced", random_state=42)
-    else:
-        rf = RandomForestClassifier(class_weight="balanced", random_state=42)
+        classifier = ExtraTreesClassifier(class_weight="balanced", random_state=random_state)
+    elif model_type == "rf":
+        classifier = RandomForestClassifier(class_weight="balanced", random_state=random_state)
 
-    # Define the hyperparameter grid
+    # Perform randomized search with cross-validation with the validation data
     param_dist = {
-        "n_estimators": [int(x) for x in np.linspace(start=50, stop=500, num=10)],
-        "max_features": ["sqrt", "log2", None],
-        "max_depth": [int(x) for x in np.linspace(10, 100, num=10)] + [None],
-        "min_samples_split": [2, 5, 10, 15, 20],
-        "min_samples_leaf": [1, 2, 4, 8, 10],
-        "bootstrap": [True, False],
-        "criterion": ["gini", "entropy"],
+        f"{model_type}__n_estimators": [int(x) for x in np.linspace(start=50, stop=500, num=10)],
+        f"{model_type}__max_features": ["sqrt", "log2", None],
+        f"{model_type}__max_depth": [int(x) for x in np.linspace(10, 100, num=10)] + [None],
+        f"{model_type}__min_samples_split": [2, 5, 10, 15, 20],
+        f"{model_type}__min_samples_leaf": [1, 2, 4, 8, 10],
+        f"{model_type}__bootstrap": [True, False],
+        f"{model_type}__criterion": ["gini", "entropy"],
     }
 
-    # Set up RandomizedSearchCV
+    cv_pipeline = Pipeline([
+        (model_type, classifier)
+    ])
+
     random_search = RandomizedSearchCV(
-        rf,
+        cv_pipeline,
         param_dist,
         n_iter=50,
         cv=3,
-        random_state=42,
+        random_state=random_state,
         n_jobs=-1,
-        verbose=0,  # Verbosity level for detailed output
+        verbose=0,
         error_score="raise",
     )
 
-    # Fit RandomizedSearchCV to the data
-    random_search.fit(X_train, y_train)
+    random_search.fit(processed_dfs['val']['X'], processed_dfs['val']['y'])
+    best_params = random_search.best_params_
 
-    # Retrieve the best model from the random search
-    best_model = random_search.best_estimator_
+    # Perform training on the training set with the best parameters
+    final_params = {k.replace(f'{model_type}__', ''): v for k, v in best_params.items()}
+    
+    if model_type == "et":
+        final_classifier = ExtraTreesClassifier(class_weight="balanced", random_state=random_state, **final_params)
+    else:
+        final_classifier = RandomForestClassifier(class_weight="balanced", random_state=random_state, **final_params)
 
-    return best_model
+    final_classifier.fit(processed_dfs['train']['X'], processed_dfs['train']['y'])
+
+    return final_classifier
 
 
-def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
+def train_logreg(processed_dfs : Dict, random_state : int) -> Pipeline:
     """
     Train a Logistic Regression model with hyperparameter tuning.
 
     Parameters
     ----------
-    X_train : np.ndarray
-        Training features array.
-    y_train : np.ndarray
-        Training labels array.
+    processed_dfs : Dict
+        Dictionary containing processed data sets.
+    random_state : int, default=42
+        Random seed for reproducibility.
 
     Returns
     -------
@@ -542,55 +568,70 @@ def train_logreg(X_train: np.ndarray, y_train: np.ndarray) -> Pipeline:
         Best estimator pipeline with PCA and LogisticRegression.
     """
 
-    # Define the pipeline
-    pipeline = Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            ("pca", PCA(n_components=0.95, random_state=42)),
-            ("log_reg", LogisticRegression(class_weight="balanced", random_state=42)),
-        ]
-    )
+    # Perform randomized search with cross-validation with the validation data
+    pipeline_steps = [
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=0.95, random_state=random_state)),
+        ("log_reg", LogisticRegression(class_weight="balanced", solver='liblinear', random_state=random_state)),
+    ]
+    
+    cv_pipeline = Pipeline(pipeline_steps)
 
-    # Define the hyperparameter grid
     param_dist = {
         "log_reg__C": uniform(1, 100),
+        "log_reg__penalty": ['l1', 'l2', 'elasticnet']
     }
 
-    # Set up RandomizedSearchCV
     random_search = RandomizedSearchCV(
-        pipeline,
+        cv_pipeline,
         param_dist,
         n_iter=50,
         cv=3,
-        random_state=42,
+        random_state=random_state,
         n_jobs=-1,
-        verbose=0,  # Verbosity level for detailed output
+        verbose=0,
         error_score="raise",
     )
 
-    # Fit RandomizedSearchCV to the data
-    random_search.fit(X_train, y_train)
+    random_search.fit(processed_dfs['val']['X'], processed_dfs['val']['y'])
+    best_params = random_search.best_params_
+    
+    # Perform training on the training set with the best parameters
+    final_pipeline_steps = [
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=0.95, random_state=random_state)),
+        (
+            "log_reg",
+            LogisticRegression(
+                class_weight="balanced", 
+                random_state=random_state,
+                solver='liblinear',
+                C=best_params['log_reg__C'],
+                penalty=best_params['log_reg__penalty']
+            ),
+        ),
+    ]
+    
+    final_model = Pipeline(final_pipeline_steps)
+    final_model.fit(processed_dfs['train']['X'], processed_dfs['train']['y'])
 
-    # Retrieve the best model from the random search
-    best_model = random_search.best_estimator_
-
-    return best_model
+    return final_model
 
 
 def train_model(
-    X_labeled: np.ndarray, y_labeled: np.ndarray, model_type: str
+    processed_dfs: Dict, model_type: str, random_state: int
 ) -> Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier]:
     """
     Train a machine learning model based on the specified model type.
 
     Parameters
     ----------
-    X_labeled : np.ndarray
-        Labeled feature data.
-    y_labeled : np.ndarray
-        Labeled target data.
+    processed_dfs : Dict
+        Dictionary containing processed data sets.
     model_type : str
         Model type: "svm", "rf", "et", or "logreg".
+    random_state : int, default=42
+        Random seed for reproducibility.
 
     Returns
     -------
@@ -598,19 +639,18 @@ def train_model(
         Trained machine learning model.
     """
     if model_type == "svm":
-        best_model = train_svm(X_labeled, y_labeled)
+        best_model = train_svm(processed_dfs, random_state)
     elif model_type in ["rf", "et"]:
-        best_model = train_rf(X_labeled, y_labeled, model_type)
+        best_model = train_rf(processed_dfs, model_type, random_state)
     elif model_type == "logreg":
-        best_model = train_logreg(X_labeled, y_labeled)
+        best_model = train_logreg(processed_dfs, random_state)
 
     return best_model
 
 
 def evaluate_model(
     best_model: Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier],
-    X: np.ndarray,
-    y: np.ndarray,
+    processed_dfs: Dict,
 ) -> Dict[str, float]:
     """
     Evaluate model performance using cross-validated predictions.
@@ -619,16 +659,17 @@ def evaluate_model(
     ----------
     best_model : Union[Pipeline, RandomForestClassifier, ExtraTreesClassifier]
         Model to be evaluated.
-    X : np.ndarray
-        Feature matrix.
-    y : np.ndarray
-        Target vector.
+    processed_dfs : Dict
+        Dictionary containing processed data sets.
 
     Returns
     -------
     Dict[str, float]
         Dictionary containing evaluation metrics: roc_auc, ap, precision, recall, f1_score.
     """
+    X = processed_dfs['X']
+    y = processed_dfs['y']
+    
     # Get cross-validated predictions and probabilities
     y_pred_proba = cross_val_predict(best_model, X, y, cv=3, method="predict_proba")
     y_pred = (y_pred_proba[:, 1] >= 0.5).astype(int)
