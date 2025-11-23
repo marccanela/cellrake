@@ -144,8 +144,6 @@ class CellRake:
         # Training parameters
         pca_variance_ratio: Optional[float] = None,
         entropy_threshold: Optional[float] = None,
-        max_test_samples: Optional[int] = None,
-        default_train_ratio: Optional[float] = None,
         label_spreading_kernel: Optional[str] = None,
         plot_entropy_threshold: Optional[float] = None,
         plot_dpi: Optional[int] = None,
@@ -160,7 +158,7 @@ class CellRake:
             Threshold for segmentation.
         model_type : str, default="rf"
             Type of model to train ('svm', 'rf', 'et', or 'logreg').
-        samples : int, default=10
+        samples : int, default=25
             Number of samples to draw from each cluster for initial labeling.
         max_sigma : int, optional
             Maximum standard deviation for LoG filter.
@@ -182,10 +180,6 @@ class CellRake:
             Proportion of variance to retain in PCA.
         entropy_threshold : float, optional
             Confidence threshold for pseudo-label selection.
-        max_test_samples : int, optional
-            Maximum number of testing samples.
-        default_train_ratio : float, optional
-            Training ratio for train/test split.
         label_spreading_kernel : str, optional
             Kernel type for label spreading algorithm.
         plot_entropy_threshold : float, optional
@@ -235,10 +229,6 @@ class CellRake:
         # Add training parameters if provided
         if entropy_threshold is not None:
             train_args["entropy_threshold"] = entropy_threshold
-        if max_test_samples is not None:
-            train_args["max_test_samples"] = max_test_samples
-        if default_train_ratio is not None:
-            train_args["default_train_ratio"] = default_train_ratio
         if label_spreading_kernel is not None:
             train_args["label_spreading_kernel"] = label_spreading_kernel
         if plot_entropy_threshold is not None:

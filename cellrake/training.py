@@ -535,8 +535,6 @@ def train_classifier(
     model_type: str,
     project_folder: Union[str, Path],
     entropy_threshold: float = 0.036,
-    max_test_samples: int = 1000,
-    default_train_ratio: float = 0.8,
     label_spreading_kernel: str = "knn",
     plot_entropy_threshold: float = 0.2,
     plot_dpi: int = 300,
@@ -565,10 +563,6 @@ def train_classifier(
         Path to project folder for saving results and models.
     entropy_threshold : float, default=0.036
         Confidence threshold for pseudo-label selection based on entropy.
-    max_test_samples : int, default=1000
-        Maximum number of testing samples when dataset is large.
-    default_train_ratio : float, default=0.8
-        Training ratio for standard train/test split on smaller datasets.
     label_spreading_kernel : str, default="knn"
         Kernel type for label spreading algorithm.
     plot_entropy_threshold : float, default=0.2
