@@ -45,8 +45,8 @@ def user_input(
 
     Returns
     -------
-    str
-        User classification: '1' for cell, '0' for non-cell.
+    int
+        User classification: 1 for cell, 0 for non-cell.
     """
     x_coords, y_coords = roi_values["x"], roi_values["y"]
 
@@ -136,7 +136,7 @@ def manual_labeling(
 # ================================================================================
 
 
-def label_speading(
+def label_spreading(
     df_train: pd.DataFrame,
     df_val: pd.DataFrame,
     df_test: pd.DataFrame,
@@ -145,7 +145,7 @@ def label_speading(
     samples: int,
     label_spreading_kernel: str,
     random_state: int,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Apply semi-supervised learning using label spreading for pseudo-labeling.
 
@@ -196,7 +196,7 @@ def label_speading(
     labeled_series = exploratory_df_labeled['label_column'].astype(int)
     df_train.loc[labeled_series.index, 'labels'] = labeled_series
 
-    # Standarize features
+    # Standardize features
     scaler = StandardScaler() # Always returns a NumPy array
     features_to_scale = [col for col in df_train.columns if col not in ['cluster', 'labels']]
     
@@ -381,7 +381,7 @@ def handle_pseudo_labels(
     plot_entropy_threshold: float,
     plot_dpi: int,
     random_state: int,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Generate pseudo-labels using label spreading and create visualization.
 
@@ -415,7 +415,7 @@ def handle_pseudo_labels(
     Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
         DataFrames with ROI features, cluster assignments, and pseudo-labels for training, validation, and testing.
     """
-    df_train_labelled, df_val_labelled, df_test_labelled = label_speading(
+    df_train_labelled, df_val_labelled, df_test_labelled = label_spreading(
         df_train,
         df_val,
         df_test,
@@ -444,7 +444,7 @@ def create_subset_df(
     layers: Dict[str, np.ndarray],
     pca_variance_ratio: float = 0.95,
     random_state: int = 42,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Extract features from ROIs and cluster them into groups for training.
 
@@ -504,7 +504,7 @@ def create_subset_df(
     
     df_train_temp, df_test = train_test_split(features_df, test_size=test_size, random_state=random_state)
 
-    # Cluster the features to aproximate the positive/negative classes (in df_train_temp)
+    # Cluster the features to approximate the positive/negative classes (in df_train_temp)
     kmeans_pipeline = Pipeline(
         [
             ("scaler", StandardScaler()),

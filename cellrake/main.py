@@ -1,9 +1,8 @@
 # Created by: Marc Canela
 
-import math
 import pickle as pkl
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 import pandas as pd
 from sklearn.base import BaseEstimator
@@ -49,6 +48,7 @@ class CellRake:
         self.metrics: Optional[Dict] = None
         self.counts: Optional[pd.DataFrame] = None
         self.features: Optional[pd.DataFrame] = None
+        self.segmented_data: Optional[Dict] = None
 
     def segment_images(
         self,
@@ -131,7 +131,7 @@ class CellRake:
         self,
         threshold_rel: float = 0.1,
         model_type: str = "rf",
-        samples: int = 25, # 2 clusetrs x "samples" to label in each
+        samples: int = 25, # 2 clusters x "samples" to label in each
         # Segmentation parameters (if you want to use different segmentation for training)
         max_sigma: Optional[int] = None,
         num_sigma: Optional[int] = None,

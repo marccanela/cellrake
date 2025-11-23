@@ -67,18 +67,18 @@ def analyze_image(
     results = dict(zip(input_names, prediction))
 
     # Keep ROIs that the model classifies as positive
-    keeped = {
+    kept = {
         roi_name: roi_dict[roi_name]
         for roi_name, result in results.items()
         if result == 1
     }
 
     # Create a new dictionary with sequential keys
-    sorted_keys = sorted(keeped.keys(), key=lambda x: int(x.split("_")[1]))
-    keeped = {f"roi_{i+1}": keeped[key] for i, key in enumerate(sorted_keys)}
+    sorted_keys = sorted(kept.keys(), key=lambda x: int(x.split("_")[1]))
+    kept = {f"roi_{i+1}": kept[key] for i, key in enumerate(sorted_keys)}
 
     # Filter the input_df
-    input_df = input_df[input_df.index.isin(keeped.keys())]
+    input_df = input_df[input_df.index.isin(kept.keys())]
 
     # Plot results
     _, axes = plt.subplots(1, 2, figsize=(12, 6))
@@ -90,7 +90,7 @@ def analyze_image(
 
     # Plot identified ROIs
     axes[1].imshow(layer, cmap=cmap, vmin=0, vmax=255)
-    for roi in keeped.values():
+    for roi in kept.values():
         axes[1].plot(roi["x"], roi["y"], "b-", linewidth=1)
     axes[1].set_title("Identified Cells")
     axes[1].axis("off")
@@ -102,7 +102,7 @@ def analyze_image(
     plt.savefig(png_path)
     plt.close()
 
-    return keeped, input_df
+    return kept, input_df
 
 
 def iterate_predicting(
@@ -142,12 +142,12 @@ def iterate_predicting(
     ):
         try:
             # Analyze ROIs and get the filtered list
-            keeped, input_df = analyze_image(
+            kept, input_df = analyze_image(
                 tag, layers, rois, cmap, project_folder, best_model
             )
 
-            # Save keeped
-            detected[tag] = keeped
+            # Save kept
+            detected[tag] = kept
 
             # Save features
             input_df = input_df.reset_index()
@@ -160,7 +160,7 @@ def iterate_predicting(
             concatenated_df = pd.concat([concatenated_df, input_df], ignore_index=True)
 
             # Count the number of positive ROIs (cells)
-            final_count = len(keeped)
+            final_count = len(kept)
             results.append((tag, final_count))
 
         except Exception as e:
